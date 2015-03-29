@@ -89,6 +89,7 @@ Library
         Parse.Parse,
         Parse.Pattern,
         Parse.Type,
+        Type.Effect.Expression,
         Type.Constrain.Expression,
         Type.Constrain.Literal,
         Type.Constrain.Pattern,

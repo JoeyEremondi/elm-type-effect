@@ -5,6 +5,7 @@ import qualified Data.Map as Map
 import qualified Type.Type as T
 import qualified Type.Environment as Env
 import qualified Type.Constrain.Expression as TcExpr
+import qualified Type.Effect.Expression as EfExpr
 import qualified Type.Solve as Solve
 
 import qualified AST.Annotation as A
@@ -45,7 +46,20 @@ genConstraints
     :: Interfaces
     -> CanonicalModule
     -> ErrorT [Doc] IO (Env.TypeDict, T.TypeConstraint)
-genConstraints interfaces modul =
+genConstraints = genConstraintsGeneric TcExpr.constrain
+
+genTotalityConstraints
+    :: Interfaces
+    -> CanonicalModule
+    -> ErrorT [Doc] IO (Env.TypeDict, T.TypeConstraint)
+genTotalityConstraints = genConstraintsGeneric EfExpr.constrain
+
+--genConstraints
+--    :: 
+--    -> Interfaces
+--    -> CanonicalModule
+--    -> ErrorT [Doc] IO (Env.TypeDict, T.TypeConstraint)
+genConstraintsGeneric constraintFun interfaces modul =
   do  env <- liftIO $ Env.initialEnvironment (canonicalizeAdts interfaces modul)
 
       ctors <- forM (Map.keys (Env.constructor env)) $ \name -> do
@@ -60,7 +74,7 @@ genConstraints interfaces modul =
           environ = A.noneNoDocs . T.CLet [ T.Scheme vars [] (A.noneNoDocs T.CTrue) header ]
 
       fvar <- liftIO $ T.variable T.Flexible
-      c <- TcExpr.constrain env (program (body modul)) (T.varN fvar)
+      c <- constraintFun env (program (body modul)) (T.varN fvar)
       return (header, environ c)
 
 
