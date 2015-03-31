@@ -29,7 +29,8 @@ infer interfaces modul =
     do  (header, constraint) <- genConstraints interfaces modul
 
         state <- liftIO $ execStateT (Solve.solve constraint) TS.initialState
-
+        
+        
         () <- case TS.sHint state of
                 hints@(_:_) -> throwError hints
                 []          -> return ()
@@ -39,9 +40,24 @@ infer interfaces modul =
         let header' = Map.delete "::" header
             types = Map.difference (TS.sSavedEnv state) header'
 
+        case checkTotality interfaces modul of
+          Left hints -> throwError hints
+          Right _ -> return ()
+
         Check.mainType types
 
+checkTotality :: Interfaces -> CanonicalModule -> Either [Doc] ()
+checkTotality interfaces modul =
+  unsafePerformIO $ runErrorT $
+    do  (header, constraint) <- genTotalityConstraints interfaces modul
 
+        state <- liftIO $ execStateT (Solve.solve constraint) TS.initialState
+        case TS.sHint state of
+                hints@(_:_) -> throwError hints
+                []          -> return ()
+
+
+       
 genConstraints
     :: Interfaces
     -> CanonicalModule

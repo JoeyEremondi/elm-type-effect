@@ -1,3 +1,4 @@
+{-# LANGUAGE ScopedTypeVariables #-}
 module Type.Effect.Expression where
 
 import Control.Applicative ((<$>))
@@ -37,6 +38,8 @@ constrain env (A region expr) tipe =
         emptyRec = termN EmptyRecord1
         bool = Env.get env Env.types "Bool"
         top = Env.get env Env.types "Int"
+        
+        subExprType subAnns = mkRecord $ zipWith (\(i::Int) t -> ("_sub" ++ show i, [t]) ) [1..] subAnns
     in
     case expr of
       Literal lit -> case lit of
@@ -60,7 +63,12 @@ constrain env (A region expr) tipe =
       
       ExplicitList exprs -> error "TODO implement"
       
-      Binop op e1 e2 -> error "TODO implement"
+      Binop op e1 e2 ->
+          exists $ \t1 ->
+          exists $ \t2 -> do
+            c1 <- constrain env e1 t1
+            c2 <- constrain env e2 t2
+            return $ and [ c1, c2, V.toString op <? (t1 ==> t2 ==> tipe) ]
           
       Lambda p e ->
           exists $ \t1 ->
@@ -77,13 +85,54 @@ constrain env (A region expr) tipe =
             c2 <- constrain env e2 t 
             return $ c1 /\ c2
 
+      MultiIf branches ->  and <$> mapM constrain' branches
+          where
+              --Ensure each branch has the same type as the overall expr
+             --TODO ensure True is in a guard?
+             constrain' (b,e) = (constrain env e tipe)
+                  
+                  
+      --TODO how does data flow from Exp to Sub-exp when matched ?
+      Case exp branches ->
+          exists $ \texp ->
+          exists $ \tPat -> do
+            --t is the type of the expression we match against 
+            ce <- constrain env exp texp
+            patsCanMatch <- Pattern.joinPats $ map fst branches
+            let branchConstraints (p,e) = do
+                  fragment <- try region $ Pattern.constrain env p texp
+                  clet [toScheme fragment] <$> constrain env e tipe
+            resultConstr <- and . (:) ce <$> mapM branchConstraints branches
+            let matchConstr = texp === patsCanMatch
+            return $ matchConstr /\ resultConstr
 
-          
-      MultiIf branches -> error "TODO implement"
       
-      Case exp branches -> error "TODO implement"
-          
-      Data name exprs -> error "TODO implement"
+      Data name [] -> do
+        arity <- error "TODO get Ctor arity"
+        doWithArgTypes arity []
+        where
+          doWithArgTypes arity argTypes = exists $ \t -> doWithArgTypes (arity - 1) (t:argTypes)
+          doWithArgTypes 0 argTypes =
+            let
+              ctorRetType = mkRecord [("_" ++ show name, [subExprType argTypes] )]
+              ctorAnnotation = makeCtorType (reverse argTypes) ctorRetType
+            in return $ tipe === ctorAnnotation
+          --Constructor take
+          makeCtorType [] ret = ret
+          makeCtorType (arg:args) ret = arg ==> ret
+
+      --We treat constructor application with args as a function call
+      Data name args -> 
+        exists $ \ctorType -> do
+          let ctorExp = (A region $ Data name [])
+          ctorConstrs <- constrain env ctorExp ctorType
+          fnConstrs <- constrain env (foldApp ctorExp args) tipe
+          return $ ctorConstrs /\ fnConstrs
+        where
+          foldApp fn [] = fn
+          foldApp fn (arg:args) = foldApp (A region $ App fn arg) args
+
+      Let defs body -> error "TODO implement"
 
       Access e label -> error "TODO implement"
           
@@ -95,8 +144,6 @@ constrain env (A region expr) tipe =
           
       Record fields -> error "TODO implement"
 
-      Let defs body -> error "TODO implement"
-      
       PortIn _ _ -> error "TODO implement"
 
       PortOut _ _ signal -> error "TODO implement"
