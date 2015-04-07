@@ -16,6 +16,7 @@ import Type.Type
 import Type.PrettyPrint
 import qualified Type.Hint as Hint
 import Elm.Utils ((|>))
+import Debug.Trace (trace)
 
 
 unify :: A.Region -> Variable -> Variable -> StateT TS.SolverState IO ()
@@ -191,7 +192,7 @@ actuallyUnify region variable1 variable2 = do
     (Nothing, _) -> superUnify
     (_, Nothing) -> superUnify
 
-    (Just type1, Just type2) ->
+    (Just type1, Just type2) -> trace ("Unifying " ++ show (pretty Never type1) ++ " " ++ show (pretty Never type2)) $ 
         case (type1,type2) of
           (App1 term1 term2, App1 term1' term2') ->
               do merge

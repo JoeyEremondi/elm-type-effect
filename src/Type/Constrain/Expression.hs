@@ -20,6 +20,7 @@ import qualified Type.Environment as Env
 import qualified Type.Constrain.Literal as Literal
 import qualified Type.Constrain.Pattern as Pattern
 
+import Debug.Trace (trace)
 
 constrain
     :: Env.Environment
@@ -82,7 +83,7 @@ constrain env (A region expr) tipe =
           exists $ \t2 -> do
             fragment <- try region $ Pattern.constrain env p t1
             c2 <- constrain env e t2
-            let c = ex (vars fragment) (clet [monoscheme (typeEnv fragment)]
+            let c = ex (vars fragment) (trace ("\n\nLambda " ++ show expr) $ clet [monoscheme (typeEnv fragment)]
                                              (typeConstraint fragment /\ c2 ))
             return $ c /\ tipe === (t1 ==> t2)
 
@@ -105,10 +106,10 @@ constrain env (A region expr) tipe =
             ce <- constrain env exp t
             let branch (p,e) = do
                   fragment <- try region $ Pattern.constrain env p t
-                  clet [toScheme fragment] <$> constrain env e tipe
+                  trace ("\n\nCase " ++ show expr) $ clet [toScheme fragment] <$> constrain env e tipe
             and . (:) ce <$> mapM branch branches
 
-      Data name exprs ->
+      Data name exprs -> trace ("Data Constraint " ++ show name) $
           do vars <- forM exprs $ \_ -> liftIO (variable Flexible)
              let pairs = zip exprs (map varN vars)
              (ctipe, cs) <- Monad.foldM step (tipe,true) (reverse pairs)
@@ -161,8 +162,8 @@ constrain env (A region expr) tipe =
                  Monad.foldM (constrainDef env)
                              ([], [], [], Map.empty, true, true)
                              (concatMap expandPattern defs)
-             return $ clet schemes
-                           (clet [Scheme rqs fqs (clet [monoscheme header] c2) header ]
+             return $ trace ("\n\nLet " ++ show expr) $ clet schemes
+                           (trace ("\n\nLet 2 " ++ show expr) $ clet [Scheme rqs fqs (trace ("\n\nLet 3 " ++ show expr) $ clet [monoscheme header] c2) header ]
                                  (c1 /\ c))
 
       PortIn _ _ -> return true

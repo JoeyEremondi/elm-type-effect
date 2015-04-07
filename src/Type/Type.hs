@@ -23,11 +23,12 @@ data Term1 a
     | Var1 a
     | EmptyRecord1
     | Record1 (Map.Map String [a]) a
-
+    deriving (Show)
 
 data TermN a
     = VarN  (Maybe Var.Canonical) a
     | TermN (Maybe Var.Canonical) (Term1 (TermN a))
+    deriving (Show)
 
 
 varN :: a -> TermN a

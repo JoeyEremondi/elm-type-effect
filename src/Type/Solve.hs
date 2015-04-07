@@ -13,6 +13,8 @@ import qualified Type.Hint as Hint
 import qualified Type.State as TS
 import qualified AST.Annotation as A
 
+import Debug.Trace (trace)
+
 
 -- | Every variable has rank less than or equal to the maxRank of the pool.
 --   This sorts variables into the young and old pools accordingly.
@@ -132,7 +134,7 @@ solve (A.A region constraint) =
 
     CInstance name term ->
       do  env <- TS.getEnv
-          freshCopy <-
+          freshCopy <- 
               case Map.lookup name env of
                 Just tipe -> TS.makeInstance tipe
                 Nothing

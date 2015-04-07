@@ -1,3 +1,4 @@
+
 module Type.Inference where
 
 import qualified Data.Map as Map
@@ -57,25 +58,35 @@ checkTotality interfaces modul =
                 []          -> return ()
 
 
-       
-genConstraints
-    :: Interfaces
-    -> CanonicalModule
-    -> ErrorT [Doc] IO (Env.TypeDict, T.TypeConstraint)
-genConstraints = genConstraintsGeneric TcExpr.constrain
 
 genTotalityConstraints
     :: Interfaces
     -> CanonicalModule
     -> ErrorT [Doc] IO (Env.TypeDict, T.TypeConstraint)
-genTotalityConstraints = genConstraintsGeneric EfExpr.constrain
+genTotalityConstraints interfaces modul =
+  do  env <- liftIO $ Env.initialEnvironment ([])
+
+      ctors <- forM (Map.keys (Env.constructor env)) $ \name -> do
+                 (_, vars, args, result) <- liftIO $ Env.freshDataScheme env name
+                 return (name, (vars, foldr (T.==>) result args))
+
+      importedVars <- mapM (canonicalizeValues env) (Map.toList interfaces)
+
+      let allTypes = concat (ctors : importedVars)
+          vars = concatMap (fst . snd) allTypes
+          header = Map.map snd (Map.fromList allTypes)
+          environ = A.noneNoDocs . T.CLet [ T.Scheme vars [] (A.noneNoDocs T.CTrue) header ]
+
+      fvar <- liftIO $ T.variable T.Flexible
+      c <- EfExpr.constrain env (program (body modul)) (T.varN fvar)
+      return (header, environ c)
 
 --genConstraints
 --    :: 
 --    -> Interfaces
 --    -> CanonicalModule
 --    -> ErrorT [Doc] IO (Env.TypeDict, T.TypeConstraint)
-genConstraintsGeneric constraintFun interfaces modul =
+genConstraints interfaces modul =
   do  env <- liftIO $ Env.initialEnvironment (canonicalizeAdts interfaces modul)
 
       ctors <- forM (Map.keys (Env.constructor env)) $ \name -> do
@@ -90,7 +101,7 @@ genConstraintsGeneric constraintFun interfaces modul =
           environ = A.noneNoDocs . T.CLet [ T.Scheme vars [] (A.noneNoDocs T.CTrue) header ]
 
       fvar <- liftIO $ T.variable T.Flexible
-      c <- constraintFun env (program (body modul)) (T.varN fvar)
+      c <- TcExpr.constrain env (program (body modul)) (T.varN fvar)
       return (header, environ c)
 
 

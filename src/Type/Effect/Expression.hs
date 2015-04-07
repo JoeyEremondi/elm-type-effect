@@ -13,6 +13,7 @@ import AST.Annotation as Ann
 import AST.Expression.General
 import qualified AST.Expression.Canonical as Canonical
 import qualified AST.Pattern as P
+import AST.PrettyPrint (pretty)
 import qualified AST.Type as ST
 import qualified AST.Variable as V
 import Type.Type hiding (Descriptor(..))
@@ -21,35 +22,44 @@ import qualified Type.Environment as Env
 import qualified Type.Effect.Literal as Literal
 import qualified Type.Effect.Pattern as Pattern
 
+import Type.Effect.Common
+
+import Debug.Trace (trace)
+
 
 constrain
     :: Env.Environment
     -> Canonical.Expr
     -> Type
     -> ErrorT [PP.Doc] IO TypeConstraint
-constrain env (A region expr) tipe =
+constrain env (A region expr) tipe = trace (" Constrain " ++ (show $ pretty expr)) $
     let list t = Env.get env Env.types "List" <| t
         and = A region . CAnd
         true = A region CTrue
         t1 === t2 = A region (CEqual t1 t2)
         x <? t = A region (CInstance x t)
         clet schemes c = A region (CLet schemes c)
-        mkRecord l = record (Map.fromList l) $ termN EmptyRecord1
+        
         emptyRec = termN EmptyRecord1
         bool = Env.get env Env.types "Bool"
         top = Env.get env Env.types "Int"
         
-        subExprType subAnns = mkRecord $ zipWith (\(i::Int) t -> ("_sub" ++ show i, [t]) ) [1..] subAnns
+        
     in
     case expr of
       Literal lit -> case lit of
-        (IntNum n) -> return $ tipe === mkRecord [("_" ++ show n, [emptyRec])]
-        (FloatNum f) -> return $ tipe === mkRecord [("_" ++ show f, [emptyRec])]
-        (Chr u) -> return $ tipe === mkRecord [("_" ++ show u, [emptyRec])]
-        (Str s) -> return $ tipe === mkRecord [("_" ++ show s, [emptyRec])]
-        (Boolean b) -> return $ tipe === mkRecord [("_" ++ show b, [emptyRec])]
+        (IntNum n) -> exists $ \restOfRec ->
+          return $ tipe === mkRecord [("_" ++ show n, [emptyRec])] restOfRec
+        (FloatNum f) -> exists $ \restOfRec ->
+          return $ tipe === mkRecord [("_" ++ show f, [emptyRec])] restOfRec
+        (Chr u) -> exists $ \restOfRec ->
+          return $ tipe === mkRecord [("_" ++ show u, [emptyRec])] restOfRec
+        (Str s) -> exists $ \restOfRec ->
+          return $ tipe === mkRecord [("_" ++ show s, [emptyRec])] restOfRec
+        (Boolean b) -> exists $ \restOfRec ->
+          return $ tipe === mkRecord [("_" ++ show b, [emptyRec])] restOfRec
 
-      GLShader _uid _src gltipe -> error "TODO implement"
+      GLShader _uid _src gltipe -> return true -- "TODO implement"
 
       --TODO need special case here?
       --TODO native?
@@ -59,9 +69,9 @@ constrain env (A region expr) tipe =
           where
             name = V.toString var
 
-      Range lo hi -> error "TODO implement"
+      Range lo hi -> return true -- "TODO implement"
       
-      ExplicitList exprs -> error "TODO implement"
+      ExplicitList exprs -> return true -- "TODO implement"
       
       Binop op e1 e2 ->
           exists $ \t1 ->
@@ -69,11 +79,13 @@ constrain env (A region expr) tipe =
             c1 <- constrain env e1 t1
             c2 <- constrain env e2 t2
             return $ and [ c1, c2, V.toString op <? (t1 ==> t2 ==> tipe) ]
-          
+
+      --Nothing fancy goes on here, we just get the annotation for the pattern
+      --And the possible constructors for the result, and bind them into a function type
       Lambda p e ->
           exists $ \t1 ->
           exists $ \t2 -> do
-            fragment <- error "TODO Pattern Constraint"--try region $ Pattern.constrain env p t1
+            fragment <- try region $ Pattern.constrain env p t1
             c2 <- constrain env e t2
             let c = ex (vars fragment) (clet [monoscheme (typeEnv fragment)]
                                              (typeConstraint fragment /\ c2 ))
@@ -82,7 +94,7 @@ constrain env (A region expr) tipe =
       App e1 e2 -> 
           exists $ \t -> do
             c1 <- constrain env e1 (t ==> tipe)
-            c2 <- constrain env e2 t 
+            c2 <- constrain env e2 t --TODO where do we speicify direction of subtyping?
             return $ c1 /\ c2
 
       MultiIf branches ->  and <$> mapM constrain' branches
@@ -93,36 +105,48 @@ constrain env (A region expr) tipe =
                   
                   
       --TODO how does data flow from Exp to Sub-exp when matched ?
-      Case exp branches ->
-          exists $ \texp ->
-          exists $ \tPat -> do
+      Case ex branches ->
+          exists $ \texp -> do
             --t is the type of the expression we match against 
-            ce <- constrain env exp texp
-            patsCanMatch <- Pattern.joinPats $ map fst branches
-            let branchConstraints (p,e) = do
-                  fragment <- try region $ Pattern.constrain env p texp
+            ce <- constrain env ex texp
+            exists $ \patsCanMatch -> do
+              canMatchConstr <-
+                Pattern.allMatchConstraints region (map fst branches) patsCanMatch
+              let branchConstraints (p,e) = do
+                  fragment <- try region $ Pattern.constrain  env p texp
                   clet [toScheme fragment] <$> constrain env e tipe
-            resultConstr <- and . (:) ce <$> mapM branchConstraints branches
-            let matchConstr = texp === patsCanMatch
-            return $ matchConstr /\ resultConstr
+              resultConstr <- and . (:) ce <$> mapM branchConstraints branches
+              let exprSubPatternsConstr = texp === patsCanMatch
+              return $ canMatchConstr /\ exprSubPatternsConstr /\ resultConstr
 
       
-      Data name [] -> do
-        arity <- error "TODO get Ctor arity"
-        doWithArgTypes arity []
+      Data rawName [] -> trace "DATA one " $ do
+        let name =
+              if ('.' `elem` rawName)
+              then rawName
+              else ("Main." ++ rawName )
+        --(arity, cvars, args, result) <- liftIO $ freshDataScheme env (V.toString name)
+        (arity,_,_,_) <- liftIO $ Env.get env Env.constructor name 
+        trace ("Data got arity " ++ show arity ) $ doWithArgTypes name arity []
         where
-          doWithArgTypes arity argTypes = exists $ \t -> doWithArgTypes (arity - 1) (t:argTypes)
-          doWithArgTypes 0 argTypes =
+          
+          doWithArgTypes nm 0 argTypes = trace "DWAT 0" $
             let
-              ctorRetType = mkRecord [("_" ++ show name, [subExprType argTypes] )]
-              ctorAnnotation = makeCtorType (reverse argTypes) ctorRetType
-            in return $ tipe === ctorAnnotation
+              --TODO closed or open?
+              ctorRetType nm = closedRecord [("_" ++ show nm, argTypes )]
+              ctorAnnotation nm = makeCtorType (reverse argTypes) $ ctorRetType nm
+            in return $ tipe === (ctorAnnotation nm)
+          doWithArgTypes nm arity argTypes = trace "DWAT n" $ exists $ \t -> doWithArgTypes nm (arity - 1) (t:argTypes)
           --Constructor take
           makeCtorType [] ret = ret
-          makeCtorType (arg:args) ret = arg ==> ret
+          makeCtorType (arg:argRest) ret = trace "MCT" $ makeCtorType argRest (arg ==> ret)
 
       --We treat constructor application with args as a function call
-      Data name args -> 
+      Data rawName args -> trace "DATA multi " $ do
+        let name =
+              if ('.' `elem` rawName)
+              then rawName
+              else ("Main." ++ rawName )  --TODO what if not in main?
         exists $ \ctorType -> do
           let ctorExp = (A region $ Data name [])
           ctorConstrs <- constrain env ctorExp ctorType
@@ -130,23 +154,31 @@ constrain env (A region expr) tipe =
           return $ ctorConstrs /\ fnConstrs
         where
           foldApp fn [] = fn
-          foldApp fn (arg:args) = foldApp (A region $ App fn arg) args
+          foldApp fn (arg:argRest) = foldApp (A region $ App fn arg) argRest
 
-      Let defs body -> error "TODO implement"
+      Let defs body -> --TODO ensure less than pattern type
+          do c <- constrain env body tipe
+             (schemes, rqs, fqs, header, c2, c1) <-
+                 Monad.foldM (constrainDef env)
+                             ([], [], [], Map.empty, true, true)
+                             (concatMap expandPattern defs)
+             return $ clet schemes
+                           (clet [Scheme rqs fqs (clet [monoscheme header] c2) header ]
+                                 (c1 /\ c))
 
-      Access e label -> error "TODO implement"
+      Access e label -> return true -- "TODO implement"
           
-      Remove e label -> error "TODO implement"
+      Remove e label -> return true -- "TODO implement"
           
-      Insert e label value -> error "TODO implement"
+      Insert e label value -> return true -- "TODO implement"
 
-      Modify e fields -> error "TODO implement"
+      Modify e fields -> return true -- "TODO implement"
           
-      Record fields -> error "TODO implement"
+      Record fields -> return true -- "TODO implement"
 
-      PortIn _ _ -> error "TODO implement"
+      PortIn _ _ -> return true -- "TODO implement"
 
-      PortOut _ _ signal -> error "TODO implement"
+      PortOut _ _ signal -> return true -- "TODO implement"
 
 constrainDef env info (Canonical.Definition pattern expr maybeTipe) =
     let qs = [] -- should come from the def, but I'm not sure what would live there...
@@ -189,10 +221,10 @@ constrainDef env info (Canonical.Definition pattern expr maybeTipe) =
 
 
 expandPattern :: Canonical.Def -> [Canonical.Def]
-expandPattern def@(Canonical.Definition pattern lexpr@(A r _) maybeType) =
+expandPattern def@(Canonical.Definition pattern lexpr@(A r _) _maybeType) =
     case pattern of
       P.Var _ -> [def]
-      _ -> Canonical.Definition (P.Var x) lexpr maybeType : map toDef vars
+      _ -> Canonical.Definition (P.Var x) lexpr Nothing : map toDef vars --we ignore type sigs
           where
             vars = P.boundVarList pattern
             x = "$" ++ concat vars
