@@ -26,9 +26,9 @@ import Data.Char (isUpper)
 
 import Type.Effect.Common
 
-import Debug.Trace (trace)
+--import Debug.Trace (trace)
 
-
+trace _ x = x
 
 constrain
     :: Env.Environment
@@ -90,9 +90,12 @@ constrain env (A region expr) tipe = trace (" Constrain " ++ (show $ pretty expr
           exists $ \t2 -> do
             fragment <- try region $ Pattern.constrain env p t1
             c2 <- constrain env e t2
-            let c = ex (vars fragment) (clet [monoscheme (typeEnv fragment)]
-                                             (typeConstraint fragment /\ c2 ))
-            return $ c /\ tipe === (t1 ==> t2)
+            --Make sure the argument type is only the patterns matched
+            cMatch <- Pattern.allMatchConstraints t1 region [p]
+            --TODO adjust this for annotations
+            let c = true --ex (vars fragment) (clet [monoscheme (typeEnv fragment)]
+                    --                         (typeConstraint fragment /\ c2 ))
+            return $ cMatch /\ c /\ tipe === (t1 ==> t2)
           
       App e1 e2 -> 
           exists $ \t -> do
@@ -117,20 +120,20 @@ constrain env (A region expr) tipe = trace (" Constrain " ++ (show $ pretty expr
             let branchConstraints (p,e) = do
                   fragment <- try region $ Pattern.constrain  env p texp
                   clet [toScheme fragment] <$> constrain env e tipe
-            resultConstr <- and . (:) ce <$> mapM branchConstraints branches
+            resultConstr <- return true--and . (:) ce <$> mapM branchConstraints branches
             return $ canMatchConstr /\ resultConstr
 
 
-      Data rawName [] -> constrainCtor region env rawName tipe
+      Data rawName [] -> trace ("DATA single " ++ rawName) $ constrainCtor region env rawName tipe
 
       --We treat constructor application with args as a function call
       Data rawName args -> trace "DATA multi " $ do
-        let name =
-              if ('.' `elem` rawName)
-              then rawName
-              else ("Main." ++ rawName )  --TODO what if not in main?
+        --let name =
+        --      if ('.' `elem` rawName)
+        --      then rawName
+        --      else ("Main." ++ rawName )  --TODO what if not in main?
         exists $ \ctorType -> do
-          let ctorExp = (A region $ Data name [])
+          let ctorExp = (A region $ Data rawName [])
           ctorConstrs <- constrain env ctorExp ctorType
           fnConstrs <- constrain env (foldApp ctorExp args) tipe
           return $ ctorConstrs /\ fnConstrs
@@ -206,13 +209,25 @@ try region computation =
 
 --TODO how to make this polyvariant?
 constrainCtor region env rawName tipe = trace "DATA one " $ do
-        let name =
+        let qualName =
               if ('.' `elem` rawName)
               then rawName
               else ("Main." ++ rawName )
         --(arity, cvars, args, result) <- liftIO $ freshDataScheme env (V.toString name)
-        (arity,typeVars,_,_) <- liftIO $ Env.get env Env.constructor name 
-        doWithArgTypes typeVars name arity []
+        let ctorDict = Env.constructor env
+        let theKey =
+              if Map.member rawName ctorDict
+              then rawName
+              else if Map.member qualName ctorDict
+              then qualName
+              else
+                let
+                  possibleKeys = filter (\k -> List.isSuffixOf rawName k) $ Map.keys ctorDict
+                in if (null possibleKeys)
+                      then error $ "Name " ++ (show rawName) ++ " not in dict " ++ show (Map.keys ctorDict)
+                      else head possibleKeys
+        (arity,typeVars,_,_) <- liftIO $ Env.get env Env.constructor theKey 
+        doWithArgTypes typeVars theKey arity []
         where
           
           doWithArgTypes typeVars nm 0 argTypes =

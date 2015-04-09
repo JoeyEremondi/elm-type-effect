@@ -13,8 +13,8 @@ import qualified Type.Hint as Hint
 import qualified Type.State as TS
 import qualified AST.Annotation as A
 
-import Debug.Trace (trace)
-
+--import Debug.Trace (trace)
+trace _ x = x
 
 -- | Every variable has rank less than or equal to the maxRank of the pool.
 --   This sorts variables into the young and old pools accordingly.

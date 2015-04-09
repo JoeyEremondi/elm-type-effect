@@ -18,6 +18,8 @@ import qualified Type.Hint as Hint
 import Elm.Utils ((|>))
 import Debug.Trace (trace)
 
+--trace _ x = x
+
 
 unify :: A.Region -> Variable -> Variable -> StateT TS.SolverState IO ()
 unify region variable1 variable2 =

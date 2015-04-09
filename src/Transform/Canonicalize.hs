@@ -63,6 +63,7 @@ moduleHelp interfaces modul@(Module.Module _ _ exports _ decls) =
                let expr = Transform.toExpr (Module.names modul) decls
                in  Transform.sortDefs (dummyLet expr)
          , types = Map.empty
+         , annots = Map.empty
          , datatypes =
              Map.fromList [ (name,(vars,ctors)) | D.Datatype name vars ctors <- decls ]
          , fixities =

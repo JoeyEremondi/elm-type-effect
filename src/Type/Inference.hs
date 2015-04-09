@@ -24,7 +24,8 @@ import Control.Monad.Error (ErrorT, runErrorT, liftIO, throwError)
 import System.IO.Unsafe  -- Possible to switch over to the ST monad instead of
                          -- the IO monad. I don't think that'd be worthwhile.
 
-import Debug.Trace (trace)
+--import Debug.Trace (trace)
+trace _ x = x
 
 infer :: Interfaces -> CanonicalModule -> Either [Doc] (Map.Map String CanonicalType)
 infer interfaces modul =
@@ -83,7 +84,7 @@ genTotalityConstraints interfaces modul =
                  (_, vars, args, result) <- liftIO $ Env.freshDataScheme env name
                  return (name, (vars, foldr (T.==>) result args))
 
-      importedVars <-  mapM (canonicalizeValues env) (Map.toList interfaces)
+      importedVars <-  mapM (canonicalizeAnnots env) (Map.toList interfaces)
 
       let allTypes = concat (ctors : importedVars)
           vars = concatMap (fst . snd) allTypes
@@ -127,6 +128,15 @@ canonicalizeValues env (moduleName, iface) =
         do  tipe' <- Env.instantiateType env tipe Map.empty
             return (Module.nameToString moduleName ++ "." ++ name, tipe')
 
+
+canonicalizeAnnots
+    :: Env.Environment
+    -> (Module.Name, Interface)
+    -> ErrorT [Doc] IO [(String, ([T.Variable], T.Type))]
+canonicalizeAnnots env (moduleName, iface) =
+    forM (Map.toList (iAnnots iface)) $ \(name,tipe) ->
+        do  tipe' <- Env.instantiateType env tipe Map.empty
+            return (Module.nameToString moduleName ++ "." ++ name, tipe')
 
 canonicalizeAdts :: Interfaces -> CanonicalModule -> [CanonicalAdt]
 canonicalizeAdts interfaces modul =

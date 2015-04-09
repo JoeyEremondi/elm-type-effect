@@ -17,7 +17,8 @@ import Type.Fragment
 import Type.Environment as Env
 import qualified Type.Constrain.Literal as Literal
 
-import Debug.Trace (trace)
+--import Debug.Trace (trace)
+trace _ x = x
 
 emptyRec = termN EmptyRecord1
 

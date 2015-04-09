@@ -19,14 +19,29 @@ import qualified Type.Effect.Literal as Literal
 import Type.Effect.Common
 import qualified Data.List as List
 
+import qualified Type.PrettyPrint as TP
+
 import Debug.Trace (trace)
 
+--trace _ x = x
 
 constrain :: Environment -> P.CanonicalPattern -> Type
           -> ErrorT (A.Region -> PP.Doc) IO Fragment
-constrain env pattern tipe = trace "Pattern constr" $ 
+constrain env pattern tipe = 
     let region = A.None (pretty pattern)
         t1 === t2 = A.A region (CEqual t1 t2)
+        genSubTypeConstr ty argList num constr = trace ("Pattern constr " ++ show (map (TP.pretty TP.App) argList ) ++ "\nregion " ++ show region) $
+          case argList of
+                [] -> return constr
+                (argTy:rest) ->
+                  exists $ \restOfRec -> do
+                  --exists $ \fieldType -> do
+                    let
+                      n :: Int
+                      n = num
+                    let ourFieldConstr = ty === (directRecord [("_sub" ++ show n, argTy)] restOfRec)
+                    let newConstr = constr /\ ourFieldConstr
+                    genSubTypeConstr ty rest (n+1) newConstr
     in
     case pattern of
       P.Anything -> return emptyFragment
@@ -56,11 +71,20 @@ constrain env pattern tipe = trace "Pattern constr" $
           --TODO is this the right args?
           (kind, cvars, args, result) <- liftIO $ freshDataScheme env (V.toString name)
           fragment <- Monad.liftM joinFragments (Monad.zipWithM (constrain env) patterns args)
-          ourConstr <- exists $ \restOfRec ->
-            return $ tipe === mkRecord [("_" ++ V.toString name, args )] restOfRec
+          let
+              
+          recordStructureConstr <-
+            exists $ \recordSubType ->
+            exists $ \restOfRec -> do
+             let ctorFieldConstr =
+                   tipe === mkRecord [("_" ++ V.toString name, [recordSubType] )] restOfRec
+             argTypesConstr <- genSubTypeConstr recordSubType args 1 $ A.A region CTrue
+             return $ ctorFieldConstr /\ argTypesConstr
+             --genSubTypeConstr tipe args 1 $ A.A region CTrue
+            --return $ tipe === mkRecord [("_" ++ V.toString name, args )] restOfRec
           
           return $ fragment {
-                typeConstraint = typeConstraint fragment /\ ourConstr,
+                typeConstraint = typeConstraint fragment /\ recordStructureConstr,
                 vars = cvars ++ vars fragment
               }
 
@@ -73,6 +97,7 @@ constrain env pattern tipe = trace "Pattern constr" $
               vars           = map snd pairs,
               typeConstraint = c
           }
+
 
 instance Error (A.Region -> PP.Doc) where
   noMsg _ = PP.empty
