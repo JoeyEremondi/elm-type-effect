@@ -40,7 +40,7 @@ constrain env (A region expr) tipe = trace (" Constrain " ++ (show $ pretty expr
         x <? t = A region (CInstance x t)
         clet schemes c = A region (CLet schemes c)
         
-        emptyRec = termN EmptyRecord1
+        --emptyRec = termN EmptyRecord1
         bool = Env.get env Env.types "Bool"
         top = Env.get env Env.types "Int"
         
@@ -49,15 +49,15 @@ constrain env (A region expr) tipe = trace (" Constrain " ++ (show $ pretty expr
     case expr of
       Literal lit -> case lit of
         (IntNum n) -> exists $ \restOfRec ->
-          return $ tipe === mkRecord [("_" ++ show n, [emptyRec])] restOfRec
+          return $ tipe === mkRecord [("_" ++ show n, [])] restOfRec
         (FloatNum f) -> exists $ \restOfRec ->
-          return $ tipe === mkRecord [("_" ++ show f, [emptyRec])] restOfRec
+          return $ tipe === mkRecord [("_" ++ show f, [])] restOfRec
         (Chr u) -> exists $ \restOfRec ->
-          return $ tipe === mkRecord [("_" ++ show u, [emptyRec])] restOfRec
+          return $ tipe === mkRecord [("_" ++ show u, [])] restOfRec
         (Str s) -> exists $ \restOfRec ->
-          return $ tipe === mkRecord [("_" ++ show s, [emptyRec])] restOfRec
+          return $ tipe === mkRecord [("_" ++ show s, [])] restOfRec
         (Boolean b) -> exists $ \restOfRec ->
-          return $ tipe === mkRecord [("_" ++ show b, [emptyRec])] restOfRec
+          return $ tipe === mkRecord [("_" ++ show b, [])] restOfRec
 
       GLShader _uid _src gltipe -> return true -- "TODO implement"
 
@@ -109,15 +109,13 @@ constrain env (A region expr) tipe = trace (" Constrain " ++ (show $ pretty expr
           exists $ \texp -> do
             --t is the type of the expression we match against 
             ce <- constrain env ex texp
-            exists $ \patsCanMatch -> do
-              canMatchConstr <-
-                Pattern.allMatchConstraints region (map fst branches) patsCanMatch
-              let branchConstraints (p,e) = do
+            canMatchConstr <-
+                Pattern.allMatchConstraints texp region (map fst branches)
+            let branchConstraints (p,e) = do
                   fragment <- try region $ Pattern.constrain  env p texp
                   clet [toScheme fragment] <$> constrain env e tipe
-              resultConstr <- and . (:) ce <$> mapM branchConstraints branches
-              let exprSubPatternsConstr = texp === patsCanMatch
-              return $ canMatchConstr /\ exprSubPatternsConstr /\ resultConstr
+            resultConstr <- and . (:) ce <$> mapM branchConstraints branches
+            return $ canMatchConstr /\ resultConstr
 
       
       Data rawName [] -> trace "DATA one " $ do
@@ -130,12 +128,13 @@ constrain env (A region expr) tipe = trace (" Constrain " ++ (show $ pretty expr
         trace ("Data got arity " ++ show arity ) $ doWithArgTypes name arity []
         where
           
-          doWithArgTypes nm 0 argTypes = trace "DWAT 0" $
+          doWithArgTypes nm 0 argTypes =
+            exists $ \restOfRecord -> do
             let
               --TODO closed or open?
-              ctorRetType nm = closedRecord [("_" ++ show nm, argTypes )]
+              ctorRetType nm = mkRecord [("_" ++ nm, argTypes )] restOfRecord
               ctorAnnotation nm = makeCtorType (reverse argTypes) $ ctorRetType nm
-            in return $ tipe === (ctorAnnotation nm)
+            return $ tipe === (ctorAnnotation nm)
           doWithArgTypes nm arity argTypes = trace "DWAT n" $ exists $ \t -> doWithArgTypes nm (arity - 1) (t:argTypes)
           --Constructor take
           makeCtorType [] ret = ret

@@ -12,6 +12,7 @@ import qualified Type.Solve as Solve
 import qualified AST.Annotation as A
 import AST.Module as Module
 import AST.Type (CanonicalType)
+import qualified AST.Type as AType
 import qualified AST.Variable as Var
 import Text.PrettyPrint
 import qualified Type.State as TS
@@ -23,6 +24,7 @@ import Control.Monad.Error (ErrorT, runErrorT, liftIO, throwError)
 import System.IO.Unsafe  -- Possible to switch over to the ST monad instead of
                          -- the IO monad. I don't think that'd be worthwhile.
 
+import Debug.Trace (trace)
 
 infer :: Interfaces -> CanonicalModule -> Either [Doc] (Map.Map String CanonicalType)
 infer interfaces modul =
@@ -58,19 +60,30 @@ checkTotality interfaces modul =
                 []          -> return ()
 
 
-
 genTotalityConstraints
     :: Interfaces
     -> CanonicalModule
     -> ErrorT [Doc] IO (Env.TypeDict, T.TypeConstraint)
 genTotalityConstraints interfaces modul =
-  do  env <- liftIO $ Env.initialEnvironment ([])
+  do
+      --We replace the types constructors take with rigid variables
+      --Since they a constructor can take any value i.e. it doesn't pattern match
+      normalEnv <- liftIO $ Env.initialEnvironment (canonicalizeAdts interfaces modul)
+      let (tyNames, oldTypes) = unzip $ Map.toList $ Env.types normalEnv
+      --TODO rigid or flex?
+      newTypes <- mapM (\_ ->
+                        do
+                           newVar <- liftIO $ T.variable T.Flexible
+                           --TODO is this right?
+                           return $ T.varN newVar) oldTypes
+
+      let env = normalEnv {Env.types = Map.fromList $ zip tyNames newTypes }
 
       ctors <- forM (Map.keys (Env.constructor env)) $ \name -> do
                  (_, vars, args, result) <- liftIO $ Env.freshDataScheme env name
                  return (name, (vars, foldr (T.==>) result args))
 
-      importedVars <- mapM (canonicalizeValues env) (Map.toList interfaces)
+      importedVars <-  mapM (canonicalizeValues env) (Map.toList interfaces)
 
       let allTypes = concat (ctors : importedVars)
           vars = concatMap (fst . snd) allTypes

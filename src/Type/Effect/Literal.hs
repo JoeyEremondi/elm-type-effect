@@ -26,15 +26,14 @@ import Debug.Trace (trace)
 constrain env region lit tipe =
   let
     t1 === t2 = A region (CEqual t1 t2)
-    emptyRec = termN EmptyRecord1
   in case lit of
         (IntNum n) -> 
-          return $ tipe === closedRecord [("_" ++ show n, [emptyRec])] 
+          return $ tipe === closedRecord [("_" ++ show n, [])] 
         (FloatNum f) -> 
-          return $ tipe === closedRecord [("_" ++ show f, [emptyRec])] 
+          return $ tipe === closedRecord [("_" ++ show f, [])] 
         (Chr u) -> 
-          return $ tipe === closedRecord [("_" ++ show u, [emptyRec])] 
+          return $ tipe === closedRecord [("_" ++ show u, [])] 
         (Str s) -> 
-          return $ tipe === closedRecord [("_" ++ show s, [emptyRec])] 
+          return $ tipe === closedRecord [("_" ++ show s, [])] 
         (Boolean b) -> 
-          return $ tipe === closedRecord [("_" ++ show b, [emptyRec])] 
+          return $ tipe === closedRecord [("_" ++ show b, [])] 

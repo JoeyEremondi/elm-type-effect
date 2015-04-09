@@ -56,7 +56,9 @@ constrain env pattern tipe = trace "Pattern constr" $
           --TODO is this the right args?
           (kind, cvars, args, result) <- liftIO $ freshDataScheme env (V.toString name)
           fragment <- Monad.liftM joinFragments (Monad.zipWithM (constrain env) patterns args)
-          let ourConstr = tipe === closedRecord [("_" ++ show name, args )]
+          ourConstr <- exists $ \restOfRec ->
+            return $ tipe === mkRecord [("_" ++ V.toString name, args )] restOfRec
+          
           return $ fragment {
                 typeConstraint = typeConstraint fragment /\ ourConstr,
                 vars = cvars ++ vars fragment
@@ -100,7 +102,7 @@ data OneLevelPat =
 
 ctorName :: P.CanonicalPattern -> String
 ctorName pat = case pat of
-  (P.Data name p2) -> "_" ++ show name
+  (P.Data name p2) -> "_" ++ V.toString name
   (P.Record p) -> error "TODO record case"
   (P.Alias p1 p2) -> ctorName p2
   (P.Var p) -> "_"
@@ -140,31 +142,47 @@ sortByCtor patList =
       
   in sortedPats
 
+containsWildcard :: P.CanonicalPattern -> Bool
+containsWildcard pat =
+  case pat of
+    (P.Alias p1 p2) -> containsWildcard p2
+    (P.Var p) -> True
+    P.Anything -> True
+    _ -> False
+
 --Given the list of patterns with the same initial constructor
 --Merge them into a single constructor string, and a list of sub-patterns matched
 --pats should never be empty
 
-allMatchConstraints
-  :: A.Region -> [P.CanonicalPattern] -> Type
-    -> ErrorT [PP.Doc] IO TypeConstraint
-allMatchConstraints region patList tipe = eachCtorHelper (sortByCtor patList)  
+allMatchConstraints argType region patList = do
+  typeCanMatch <- typeForPatList region patList
+  return $ (argType === typeCanMatch)
+    where t1 === t2 = A.A region (CEqual t1 t2)
+
+typeForPatList
+  :: A.Region -> [P.CanonicalPattern]
+    -> ErrorT [PP.Doc] IO Type
+typeForPatList region patList =
+  if any containsWildcard patList
+     then anyVar
+     else eachCtorHelper (sortByCtor patList)  
   where
+    anyVar = do
+      newVar <- liftIO $ variable Flexible
+      return $ varN newVar
     indexFields = map (\i -> "_" ++ show i) [1..]
     true = A.A region CTrue
-    eachCtorHelper []  = return true
+    eachCtorHelper []  = return emptyRec
     eachCtorHelper ( (ctor, subPats ) : otherPats) =
-      exists $ \subType ->
-      exists $ \otherFields -> do
-        subConsts <- eachArgHelper (zip indexFields subPats) subType
-        otherFieldConstr <- eachCtorHelper otherPats
-        let ourRecConstr = A.A region $ CEqual tipe (mkRecord [(ctor, [subType])] otherFields )
-        return $ subConsts /\ otherFieldConstr /\ ourRecConstr
-    eachArgHelper [] tipe = return $ A.A region  $ CEqual tipe emptyRec
-    eachArgHelper ((fieldName, argPats) : otherPats) tipe =
-      exists $ \otherFields ->
-      exists $ \thisArgType -> do
-        argConstr <- allMatchConstraints region argPats thisArgType
-        otherFieldsConstr <- eachArgHelper otherPats otherFields
-        let ourTypeConstr = A.A region $ CEqual thisArgType (mkRecord [(fieldName, [tipe])] otherFields )
-        return $ argConstr /\ otherFieldsConstr /\ ourTypeConstr
+      do
+        subType <- eachArgHelper (zip indexFields subPats)
+        otherFields <- eachCtorHelper otherPats
+        let ourRec = (directRecord [(ctor, subType)] otherFields )
+        return ourRec -- $ subConsts /\ otherFieldConstr /\ ourRecConstr
+    eachArgHelper [] = return emptyRec
+    eachArgHelper ((fieldName, argPats) : otherPats) =
+      do
+        thisArgType <- typeForPatList region argPats
+        otherFields <- eachArgHelper otherPats
+        return   (mkRecord [(fieldName, [thisArgType])] otherFields )
         
