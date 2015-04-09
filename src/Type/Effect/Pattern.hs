@@ -170,7 +170,7 @@ typeForPatList region patList =
     anyVar = do
       newVar <- liftIO $ variable Flexible
       return $ varN newVar
-    indexFields = map (\i -> "_" ++ show i) [1..]
+    indexFields = map (\i -> "_sub" ++ show i) [1..]
     true = A.A region CTrue
     eachCtorHelper []  = return emptyRec
     eachCtorHelper ( (ctor, subPats ) : otherPats) =

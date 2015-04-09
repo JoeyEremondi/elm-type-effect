@@ -22,9 +22,12 @@ import qualified Type.Environment as Env
 import qualified Type.Effect.Literal as Literal
 import qualified Type.Effect.Pattern as Pattern
 
+import Data.Char (isUpper)
+
 import Type.Effect.Common
 
 import Debug.Trace (trace)
+
 
 
 constrain
@@ -117,28 +120,8 @@ constrain env (A region expr) tipe = trace (" Constrain " ++ (show $ pretty expr
             resultConstr <- and . (:) ce <$> mapM branchConstraints branches
             return $ canMatchConstr /\ resultConstr
 
-      
-      Data rawName [] -> trace "DATA one " $ do
-        let name =
-              if ('.' `elem` rawName)
-              then rawName
-              else ("Main." ++ rawName )
-        --(arity, cvars, args, result) <- liftIO $ freshDataScheme env (V.toString name)
-        (arity,_,_,_) <- liftIO $ Env.get env Env.constructor name 
-        trace ("Data got arity " ++ show arity ) $ doWithArgTypes name arity []
-        where
-          
-          doWithArgTypes nm 0 argTypes =
-            exists $ \restOfRecord -> do
-            let
-              --TODO closed or open?
-              ctorRetType nm = mkRecord [("_" ++ nm, argTypes )] restOfRecord
-              ctorAnnotation nm = makeCtorType (reverse argTypes) $ ctorRetType nm
-            return $ tipe === (ctorAnnotation nm)
-          doWithArgTypes nm arity argTypes = trace "DWAT n" $ exists $ \t -> doWithArgTypes nm (arity - 1) (t:argTypes)
-          --Constructor take
-          makeCtorType [] ret = ret
-          makeCtorType (arg:argRest) ret = trace "MCT" $ makeCtorType argRest (arg ==> ret)
+
+      Data rawName [] -> constrainCtor region env rawName tipe
 
       --We treat constructor application with args as a function call
       Data rawName args -> trace "DATA multi " $ do
@@ -158,7 +141,7 @@ constrain env (A region expr) tipe = trace (" Constrain " ++ (show $ pretty expr
       Let defs body -> --TODO ensure less than pattern type
           do c <- constrain env body tipe
              (schemes, rqs, fqs, header, c2, c1) <-
-                 Monad.foldM (constrainDef env)
+                 Monad.foldM (constrainDef region env)
                              ([], [], [], Map.empty, true, true)
                              (concatMap expandPattern defs)
              return $ clet schemes
@@ -179,31 +162,14 @@ constrain env (A region expr) tipe = trace (" Constrain " ++ (show $ pretty expr
 
       PortOut _ _ signal -> return true -- "TODO implement"
 
-constrainDef env info (Canonical.Definition pattern expr maybeTipe) =
+constrainDef region env info (Canonical.Definition pattern expr maybeTipe) =
     let qs = [] -- should come from the def, but I'm not sure what would live there...
         (schemes, rigidQuantifiers, flexibleQuantifiers, headers, c2, c1) = info
     in
     do rigidVars <- forM qs (\_ -> liftIO $ variable Rigid) -- Some mistake may be happening here.
                                                        -- Currently, qs is always [].
-       case (pattern, maybeTipe) of
-         (P.Var name, Just tipe) -> do
-             flexiVars <- forM qs (\_ -> liftIO $ variable Flexible)
-             let inserts = zipWith (\arg typ -> Map.insert arg (varN typ)) qs flexiVars
-                 env' = env { Env.value = List.foldl' (\x f -> f x) (Env.value env) inserts }
-             (vars, typ) <- Env.instantiateType env tipe Map.empty
-             let scheme = Scheme { rigidQuantifiers = [],
-                                   flexibleQuantifiers = flexiVars ++ vars,
-                                   constraint = Ann.noneNoDocs CTrue,
-                                   header = Map.singleton name typ }
-             c <- constrain env' expr typ
-             return ( scheme : schemes
-                    , rigidQuantifiers
-                    , flexibleQuantifiers
-                    , headers
-                    , c2
-                    , fl rigidVars c /\ c1 )
-
-         (P.Var name, Nothing) -> do
+       case pattern of
+         (P.Var name) -> do
              v <- liftIO $ variable Flexible
              let tipe = varN v
                  inserts = zipWith (\arg typ -> Map.insert arg (varN typ)) qs rigidVars
@@ -238,4 +204,30 @@ try region computation =
         Left err -> throwError [err region]
         Right value -> return value
 
-
+--TODO how to make this polyvariant?
+constrainCtor region env rawName tipe = trace "DATA one " $ do
+        let name =
+              if ('.' `elem` rawName)
+              then rawName
+              else ("Main." ++ rawName )
+        --(arity, cvars, args, result) <- liftIO $ freshDataScheme env (V.toString name)
+        (arity,typeVars,_,_) <- liftIO $ Env.get env Env.constructor name 
+        doWithArgTypes typeVars name arity []
+        where
+          
+          doWithArgTypes typeVars nm 0 argTypes =
+            exists $ \restOfRecord -> do
+            let
+              --TODO closed or open?
+              ctorRetType nm = mkRecord [("_" ++ nm, argTypes )] restOfRecord
+              ctorAnnotation nm = --applyTypeVars typeVars
+                makeCtorType (reverse argTypes) $ ctorRetType nm
+            return $ A region $ CEqual tipe (ctorAnnotation nm)
+          doWithArgTypes typeVars nm arity argTypes =
+            exists $ \t ->
+              doWithArgTypes typeVars nm (arity - 1) (t:argTypes)
+          --Constructor take
+          makeCtorType [] ret = ret
+          makeCtorType (arg:argRest) ret = trace "MCT" $ makeCtorType argRest (arg ==> ret)
+          --applyTypeVars [] ty = ty
+          --applyTypeVars (var:vars) ty = applyTypeVars vars (ty <| (varN var) )
