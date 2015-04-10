@@ -159,10 +159,15 @@ mergeOneLevel p1@(Ctor (n1, pl1) ) p2@(Ctor (n2, pl2) ) =
 sortByCtor :: [P.CanonicalPattern] -> [(String, [[P.CanonicalPattern]])]
 sortByCtor patList =
   let
+    --TODO sort other than by CTOR?
     allNames = (List.nub $ map (ctorName) patList)
     maybeAddName name pat subPatList = case pat of
       P.Data name2 pats -> if (name == ctorName pat) then (pats : subPatList) else subPatList
-      _ -> error "TODO other cases"
+      (P.Record e) -> subPatList
+      (P.Alias e1 e2) -> subPatList
+      (P.Var e) -> subPatList --Ignore these, we should catch this earlier
+      P.Anything -> subPatList --Ignore these, we should catch this earlier
+      (P.Literal e) -> subPatList
     sortedPats = [ (ctor, List.transpose $ foldr (maybeAddName ctor) [] patList) | ctor <- allNames]
       
   in sortedPats

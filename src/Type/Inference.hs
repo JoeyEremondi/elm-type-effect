@@ -1,4 +1,5 @@
 
+
 module Type.Inference where
 
 import qualified Data.Map as Map
@@ -27,7 +28,12 @@ import System.IO.Unsafe  -- Possible to switch over to the ST monad instead of
 --import Debug.Trace (trace)
 trace _ x = x
 
-infer :: Interfaces -> CanonicalModule -> Either [Doc] (Map.Map String CanonicalType)
+infer
+  :: Interfaces
+  -> CanonicalModule
+  -> Either
+      [Doc]
+      (Map.Map String CanonicalType, Map.Map String CanonicalType)
 infer interfaces modul =
   unsafePerformIO $ runErrorT $
     do  (header, constraint) <- genConstraints interfaces modul
@@ -44,21 +50,26 @@ infer interfaces modul =
         let header' = Map.delete "::" header
             types = Map.difference (TS.sSavedEnv state) header'
 
-        case checkTotality interfaces modul of
+        annots <- case checkTotality interfaces modul of
           Left hints -> throwError hints
-          Right _ -> return ()
+          Right ann -> return ann
 
-        Check.mainType types
+        typeResult <-  Check.mainType types
+        return (typeResult, annots)
 
-checkTotality :: Interfaces -> CanonicalModule -> Either [Doc] ()
+checkTotality :: Interfaces -> CanonicalModule -> Either [Doc] (Map.Map String CanonicalType)
 checkTotality interfaces modul =
-  unsafePerformIO $ runErrorT $
+  unsafePerformIO  $ runErrorT $
     do  (header, constraint) <- genTotalityConstraints interfaces modul
 
         state <- liftIO $ execStateT (Solve.solve constraint) TS.initialState
         case TS.sHint state of
                 hints@(_:_) -> throwError hints
                 []          -> return ()
+        let header' = Map.delete "::" header
+            types = Map.difference (TS.sSavedEnv state) header'
+        Check.toCanon types
+        
 
 
 genTotalityConstraints
