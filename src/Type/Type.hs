@@ -84,6 +84,23 @@ monoscheme :: Map.Map String a -> Scheme a b
 monoscheme headers = Scheme [] [] (noneNoDocs CTrue) headers
 
 
+showType :: Type -> String
+showType t = case t of
+  (VarN Nothing ty2) -> "?" ++ (show $ mark $ unsafePerformIO $ UF.descriptor ty2)
+  (VarN (Just ty1) ty2) -> show $ Var.toString ty1
+  _ -> show $ pretty App t
+
+showVar t = show $ pretty App t
+
+showConstr :: TypeConstraint -> String
+showConstr (A _ con) = case con of
+  CTrue -> ""
+  CSaveEnv -> "SAVE_ENV"
+  (CEqual c1 c2) -> (showType c1 ) ++ " === " ++ (showType c2)
+  (CAnd conList) -> "\n****" ++ (List.intercalate "\n" $ map showConstr conList)
+  (CLet vars c2) -> "Let " ++ (List.intercalate "\n" $ map showVar vars) ++ showConstr c2
+  (CInstance c1 c2) -> "INST"
+
 infixl 8 /\
 
 (/\) :: Constraint a b -> Constraint a b -> Constraint a b
@@ -112,7 +129,7 @@ data Descriptor = Descriptor
     , copy :: Maybe Variable
     , mark :: Int
     , alias :: Maybe Var.Canonical
-    }
+    } 
 
 
 noRank :: Int

@@ -28,12 +28,12 @@ constrain env region lit tipe =
     t1 === t2 = A region (CEqual t1 t2)
   in case lit of
         (IntNum n) -> 
-          return $ tipe === closedRecord [("_" ++ show n, [])] 
+          return $ tipe === closedAnnot [("_" ++ show n, [])] 
         (FloatNum f) -> 
-          return $ tipe === closedRecord [("_" ++ show f, [])] 
+          return $ tipe === closedAnnot [("_" ++ show f, [])] 
         (Chr u) -> 
-          return $ tipe === closedRecord [("_" ++ show u, [])] 
+          return $ tipe === closedAnnot [("_" ++ show u, [])] 
         (Str s) -> 
-          return $ tipe === closedRecord [("_" ++ show s, [])] 
+          return $ tipe === closedAnnot [("_" ++ show s, [])] 
         (Boolean b) -> 
-          return $ tipe === closedRecord [("_" ++ show b, [])] 
+          return $ tipe === closedAnnot [("_" ++ show b, [])] 

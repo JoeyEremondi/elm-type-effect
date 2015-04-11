@@ -14,6 +14,7 @@ import AST.Expression.General
 import qualified AST.Expression.Canonical as Canonical
 import qualified AST.Pattern as P
 import AST.PrettyPrint (pretty)
+import qualified Type.PrettyPrint as TP
 import qualified AST.Type as ST
 import qualified AST.Variable as V
 import Type.Type hiding (Descriptor(..))
@@ -26,9 +27,10 @@ import Data.Char (isUpper)
 
 import Type.Effect.Common
 
---import Debug.Trace (trace)
+import Debug.Trace (trace)
 
-trace _ x = x
+--trace _ x = x
+t1 =-> t2 = closedAnnot [("_Lambda", [t1, t2])]
 
 constrain
     :: Env.Environment
@@ -40,6 +42,8 @@ constrain env (A region expr) tipe = trace (" Constrain " ++ (show $ pretty expr
         and = A region . CAnd
         true = A region CTrue
         t1 === t2 = A region (CEqual t1 t2)
+        t1 ==> t2 = error "BAD LAMBDA TODO"--
+         --We override this for our fn def
         x <? t = A region (CInstance x t)
         clet schemes c = A region (CLet schemes c)
         
@@ -52,15 +56,15 @@ constrain env (A region expr) tipe = trace (" Constrain " ++ (show $ pretty expr
     case expr of
       Literal lit -> case lit of
         (IntNum n) -> exists $ \restOfRec ->
-          return $ tipe === mkRecord [("_" ++ show n, [])] restOfRec
+          return $ trace "mkAnnot expr" $ tipe === mkAnnot [("_" ++ show n, [])] restOfRec
         (FloatNum f) -> exists $ \restOfRec ->
-          return $ tipe === mkRecord [("_" ++ show f, [])] restOfRec
+          return $ tipe === mkAnnot [("_" ++ show f, [])] restOfRec
         (Chr u) -> exists $ \restOfRec ->
-          return $ tipe === mkRecord [("_" ++ show u, [])] restOfRec
+          return $ tipe === mkAnnot [("_" ++ show u, [])] restOfRec
         (Str s) -> exists $ \restOfRec ->
-          return $ tipe === mkRecord [("_" ++ show s, [])] restOfRec
+          return $ tipe === mkAnnot [("_" ++ show s, [])] restOfRec
         (Boolean b) -> exists $ \restOfRec ->
-          return $ tipe === mkRecord [("_" ++ show b, [])] restOfRec
+          return $ tipe === mkAnnot [("_" ++ show b, [])] restOfRec
 
       GLShader _uid _src gltipe -> return true -- "TODO implement"
 
@@ -81,25 +85,27 @@ constrain env (A region expr) tipe = trace (" Constrain " ++ (show $ pretty expr
           exists $ \t2 -> do
             c1 <- constrain env e1 t1
             c2 <- constrain env e2 t2
-            return $ and [ c1, c2, V.toString op <? (t1 ==> t2 ==> tipe) ]
+            return $ and [ c1, c2, V.toString op <? (t1 =-> t2 =-> tipe) ]
 
       --Nothing fancy goes on here, we just get the annotation for the pattern
       --And the possible constructors for the result, and bind them into a function type
       Lambda p e ->
-          exists $ \t1 ->
-          exists $ \t2 -> do
-            fragment <- try region $ Pattern.constrain env p t1
-            c2 <- constrain env e t2
+          exists $ \targ ->
+          exists $ \tbody -> do
+            fragment <- try region $ Pattern.constrain env p targ
+            --TODO constrain arg types
+            c2 <- constrain env e tbody
             --Make sure the argument type is only the patterns matched
-            cMatch <- Pattern.allMatchConstraints t1 region [p]
+            cMatch <- Pattern.allMatchConstraints targ region [p]
             --TODO adjust this for annotations
-            let c = true --ex (vars fragment) (clet [monoscheme (typeEnv fragment)]
-                    --                         (typeConstraint fragment /\ c2 ))
-            return $ cMatch /\ c /\ tipe === (t1 ==> t2)
+            c <- return $ ex (vars fragment) (clet [monoscheme (typeEnv fragment)]
+                                             (typeConstraint fragment /\ c2 ))
+            let retConstr = cMatch /\ c /\ tipe === (targ =-> tbody)
+            return $ trace ("LAMBDA constr: " ++ showConstr retConstr ++ "***\n\n")  $ retConstr
           
       App e1 e2 -> 
           exists $ \t -> do
-            c1 <- constrain env e1 (t ==> tipe)
+            c1 <- constrain env e1 (t =-> tipe)
             c2 <- constrain env e2 t --TODO where do we speicify direction of subtyping?
             return $ c1 /\ c2
 
@@ -111,16 +117,21 @@ constrain env (A region expr) tipe = trace (" Constrain " ++ (show $ pretty expr
                   
                   
       --TODO how does data flow from Exp to Sub-exp when matched ?
-      Case ex branches ->
-          exists $ \texp -> do
+      Case ex branches -> trace ("CASE: Type " ++ show (TP.pretty TP.App tipe)) $
+          exists $ \texp ->
+          exists $ \tReturn -> do
             --t is the type of the expression we match against 
             ce <- constrain env ex texp
             canMatchConstr <-
                 Pattern.allMatchConstraints texp region (map fst branches)
-            let branchConstraints (p,e) = do
-                  fragment <- try region $ Pattern.constrain  env p texp
-                  clet [toScheme fragment] <$> constrain env e tipe
-            resultConstr <- return true--and . (:) ce <$> mapM branchConstraints branches
+            let branchConstraints (p,e) =
+                  exists $ \retAnnot -> do
+                    --let recType = _
+                    fragment <- try region $ Pattern.constrain  env p texp
+                    letConstr <- clet [toScheme fragment] <$> constrain env e retAnnot 
+                    return $ trace ("Case branch constr: " ++ showConstr letConstr)
+                      $ letConstr  /\ retAnnot === tipe
+            resultConstr <- and . (:) ce <$> mapM branchConstraints branches
             return $ canMatchConstr /\ resultConstr
 
 
@@ -234,7 +245,7 @@ constrainCtor region env rawName tipe = trace "DATA one " $ do
             exists $ \restOfRecord -> do
             let
               --TODO closed or open?
-              ctorRetType nm = mkRecord [("_" ++ nm, argTypes )] restOfRecord
+              ctorRetType nm = mkAnnot [("_" ++ nm, argTypes )] restOfRecord
               ctorAnnotation nm = --applyTypeVars typeVars
                 makeCtorType (reverse argTypes) $ ctorRetType nm
             return $ A region $ CEqual tipe (ctorAnnotation nm)
@@ -243,6 +254,6 @@ constrainCtor region env rawName tipe = trace "DATA one " $ do
               doWithArgTypes typeVars nm (arity - 1) (t:argTypes)
           --Constructor take
           makeCtorType [] ret = ret
-          makeCtorType (arg:argRest) ret = trace "MCT" $ makeCtorType argRest (arg ==> ret)
+          makeCtorType (arg:argRest) ret = trace "MCT" $ makeCtorType argRest (arg =-> ret)
           --applyTypeVars [] ty = ty
           --applyTypeVars (var:vars) ty = applyTypeVars vars (ty <| (varN var) )

@@ -1,5 +1,5 @@
 {-# LANGUAGE ScopedTypeVariables #-}
-module Type.Effect.Common (mkRecord, closedRecord, directRecord, emptyRec ) where
+module Type.Effect.Common (mkAnnot, closedAnnot, directRecord, emptyRec ) where
 
 import Control.Arrow (second)
 import Control.Applicative ((<$>))
@@ -17,8 +17,10 @@ import Type.Fragment
 import Type.Environment as Env
 import qualified Type.Constrain.Literal as Literal
 
---import Debug.Trace (trace)
-trace _ x = x
+import qualified Type.PrettyPrint as TP
+
+import Debug.Trace (trace, traceStack)
+--trace _ x = x
 
 emptyRec = termN EmptyRecord1
 
@@ -27,17 +29,19 @@ mkClosedRecord l = record (Map.fromList l) $ termN EmptyRecord1
 subExprType subAnns = mkClosedRecord $ zipWith (\(i::Int) t -> ("_sub" ++ show i, [t]) ) [1..] subAnns
 
 
-mkRecord :: [(String, [Type] )] -> Type -> Type
-mkRecord fields restOfRecord =
+showField (nm, args) = nm ++ " : " ++ (show $ map (TP.pretty TP.App) args)
+
+mkAnnot :: [(String, [Type] )] -> Type -> Type
+mkAnnot fields restOfRecord = trace ("Making record " ++ show (map showField fields )  ) $
   let
     recDict = Map.fromList $ map (\(nm,args) -> (nm, [subExprType args]) ) fields
   in record recDict restOfRecord
 
-closedRecord :: [(String, [Type] )] -> Type
-closedRecord fields = mkRecord fields (termN EmptyRecord1)
+closedAnnot :: [(String, [Type] )] -> Type
+closedAnnot fields = mkAnnot fields (termN EmptyRecord1)
 
 directRecord :: [(String, Type )] -> Type -> Type
-directRecord fields restOfRecord =
+directRecord fields restOfRecord = trace ("Direct record " ++ show (map (\(f,x) -> showField (f,[x])) fields )  ) $
   let
     recDict = Map.fromList $ map (\(nm,argTy) -> (nm, [argTy]) ) fields
   in record recDict restOfRecord

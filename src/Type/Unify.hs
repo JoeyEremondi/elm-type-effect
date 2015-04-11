@@ -225,7 +225,7 @@ recordUnify
     -> Variable
     -> Variable
     -> Unify ()
-recordUnify region fresh variable1 variable2 =
+recordUnify region fresh variable1 variable2 = trace ("REC Unifying records " ++ (show $ pretty App variable1) ++ (show $ pretty App variable2) ) $
   do  (ExpandedRecord fields1 ext1) <- liftIO (gatherFields variable1)
       (ExpandedRecord fields2 ext2) <- liftIO (gatherFields variable2)
 

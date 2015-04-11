@@ -22,7 +22,6 @@ import qualified Data.List as List
 import qualified Type.PrettyPrint as TP
 
 import Debug.Trace (trace)
-
 --trace _ x = x
 
 constrain :: Environment -> P.CanonicalPattern -> Type
@@ -77,7 +76,7 @@ constrain env pattern tipe =
             exists $ \recordSubType ->
             exists $ \restOfRec -> do
              let ctorFieldConstr =
-                   tipe === mkRecord [("_" ++ V.toString name, [recordSubType] )] restOfRec
+                   trace "mkAnnot2" $ tipe === directRecord [("_" ++ V.toString name, recordSubType )] restOfRec
              argTypesConstr <- genSubTypeConstr recordSubType args 1 $ A.A region CTrue
              return $ ctorFieldConstr /\ argTypesConstr
              --genSubTypeConstr tipe args 1 $ A.A region CTrue
@@ -186,7 +185,7 @@ containsWildcard pat =
 
 allMatchConstraints argType region patList = do
   typeCanMatch <- typeForPatList region patList
-  return $ (argType === typeCanMatch)
+  return $ trace ("Pattern match type : " ++ show (TP.pretty TP.App typeCanMatch) ) $ (argType === typeCanMatch)
     where t1 === t2 = A.A region (CEqual t1 t2)
 
 typeForPatList
@@ -200,19 +199,20 @@ typeForPatList region patList =
     anyVar = do
       newVar <- liftIO $ variable Flexible
       return $ varN newVar
-    indexFields = map (\i -> "_sub" ++ show i) [1..]
+    --indexFields = map (\i -> "_sub" ++ show i) ([1..] :: [Int])
     true = A.A region CTrue
     eachCtorHelper []  = return emptyRec
     eachCtorHelper ( (ctor, subPats ) : otherPats) =
       do
-        subType <- eachArgHelper (zip indexFields subPats)
+        subTypes <- mapM (typeForPatList region) subPats
         otherFields <- eachCtorHelper otherPats
-        let ourRec = (directRecord [(ctor, subType)] otherFields )
+        let ourRec = (trace "mkAnnot1" $ mkAnnot [(ctor, subTypes)] otherFields )
         return ourRec -- $ subConsts /\ otherFieldConstr /\ ourRecConstr
-    eachArgHelper [] = return emptyRec
+
+    {-eachArgHelper [] = return emptyRec
     eachArgHelper ((fieldName, argPats) : otherPats) =
       do
         thisArgType <- typeForPatList region argPats
         otherFields <- eachArgHelper otherPats
-        return   (mkRecord [(fieldName, [thisArgType])] otherFields )
+        return   (directRecord [(fieldName, thisArgType)] otherFields ) -}
         

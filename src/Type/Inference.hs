@@ -18,15 +18,17 @@ import qualified AST.Variable as Var
 import Text.PrettyPrint
 import qualified Type.State as TS
 import qualified Type.ExtraChecks as Check
+import qualified Data.List as List
 import Control.Arrow (first, second)
 import Control.Monad.State (execStateT, forM)
 import Control.Monad.Error (ErrorT, runErrorT, liftIO, throwError)
+import qualified Type.PrettyPrint as TP
 
 import System.IO.Unsafe  -- Possible to switch over to the ST monad instead of
                          -- the IO monad. I don't think that'd be worthwhile.
 
---import Debug.Trace (trace)
-trace _ x = x
+import Debug.Trace (trace)
+--trace _ x = x
 
 infer
   :: Interfaces
@@ -52,17 +54,21 @@ infer interfaces modul =
 
         annots <- case checkTotality interfaces modul of
           Left hints -> throwError hints
-          Right ann -> return ann
+          Right ann -> return ann 
+        --let annots = Map.empty :: Map.Map String CanonicalType
 
         typeResult <-  Check.mainType types
-        return (typeResult, annots)
+        return $ trace ("Annotations: " ++ show annots ) (typeResult, annots)
+
+
 
 checkTotality :: Interfaces -> CanonicalModule -> Either [Doc] (Map.Map String CanonicalType)
 checkTotality interfaces modul =
   unsafePerformIO  $ runErrorT $
     do  (header, constraint) <- genTotalityConstraints interfaces modul
 
-        state <- liftIO $ execStateT (Solve.solve constraint) TS.initialState
+        state <- trace ("Got constraints " ++ T.showConstr constraint)
+                $ liftIO $ execStateT (Solve.solve constraint) TS.initialState
         case TS.sHint state of
                 hints@(_:_) -> throwError hints
                 []          -> return ()
