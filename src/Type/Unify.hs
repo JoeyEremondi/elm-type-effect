@@ -194,7 +194,7 @@ actuallyUnify region variable1 variable2 = do
     (Nothing, _) -> superUnify
     (_, Nothing) -> superUnify
 
-    (Just type1, Just type2) -> trace ("Unifying " ++ show (pretty Never type1) ++ " " ++ show (pretty Never type2)) $ 
+    (Just type1, Just type2) -> trace ("Unifying " ++ show (pretty Never type1) ++ " " ++ show (pretty Never type2) ++ "\n" ++ show region) $ 
         case (type1,type2) of
           (App1 term1 term2, App1 term1' term2') ->
               do merge

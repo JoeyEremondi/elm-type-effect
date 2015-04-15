@@ -86,7 +86,7 @@ monoscheme headers = Scheme [] [] (noneNoDocs CTrue) headers
 
 showType :: Type -> String
 showType t = case t of
-  (VarN Nothing ty2) -> "?" ++ (show $ mark $ unsafePerformIO $ UF.descriptor ty2)
+  (VarN Nothing ty2) -> "?" ++ (show $ mark $ unsafePerformIO $ UF.descriptor ty2) ++ "&"
   (VarN (Just ty1) ty2) -> show $ Var.toString ty1
   _ -> show $ pretty App t
 
@@ -204,6 +204,11 @@ exists f =
   do  v <- liftIO $ variable Flexible
       ex [v] <$> f (varN v)
 
+existsNamed :: Error e => String -> (Type -> ErrorT e IO TypeConstraint) -> ErrorT e IO TypeConstraint
+existsNamed nm f =
+  do  v <- liftIO $ namedVar Flexible (Var.Canonical Var.Local nm ) 
+      ex [v] <$> f (varN v)
+
 
 existsNumber :: Error e => (Type -> ErrorT e IO TypeConstraint) -> ErrorT e IO TypeConstraint
 existsNumber f =
@@ -279,7 +284,7 @@ instance PrettyType Descriptor where
           | otherwise ->
               P.text (Var.toString name)
                             
-      _ -> P.text "?"
+      _ -> P.text ("[[?" ++ show (mark desc) ++ "]]")
 
 
 instance (PrettyType a, PrettyType b) => PrettyType (BasicConstraint a b) where
