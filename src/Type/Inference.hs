@@ -27,8 +27,8 @@ import qualified Type.PrettyPrint as TP
 import System.IO.Unsafe  -- Possible to switch over to the ST monad instead of
                          -- the IO monad. I don't think that'd be worthwhile.
 
-import Debug.Trace (trace)
---trace _ x = x
+--import Debug.Trace (trace)
+trace _ x = x
 
 infer
   :: Interfaces

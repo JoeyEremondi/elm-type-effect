@@ -68,6 +68,16 @@ constrain env (A region expr) tipe = trace (" Constrain " ++ (show $ pretty expr
 
       GLShader _uid _src gltipe -> return true -- "TODO implement"
 
+
+      Var (V.Canonical (V.Module ("Native":_)) _) -> return true
+      --Special case: Native is a Rigid type variable, could be anything
+      {-
+      Var (V.Canonical (V.Module ("Native":_)) _) -> do
+        exists $ \restOfRec -> do
+          rigidType <- varN `fmap` (liftIO $ variable Rigid)
+          return true --(tipe === rigidType) --TODO constrain native?
+        -}
+
       --TODO need special case here?
       --TODO native?
       Var var
@@ -82,7 +92,7 @@ constrain env (A region expr) tipe = trace (" Constrain " ++ (show $ pretty expr
       
       --Treat binops just like functions at the type level
       --TODO is this okay?
-      Binop op e1 e2 -> do
+      Binop op e1 e2 -> trace ("BINOP " ++ show e1 ++ "\n" ++ show e2) $ do
         let opFn = A region $ Var op
         let fn1 = A region $ App opFn e1
         let fnVersion = A region $ App fn1 e2
@@ -100,9 +110,9 @@ constrain env (A region expr) tipe = trace (" Constrain " ++ (show $ pretty expr
             cMatch <- Pattern.allMatchConstraints targ region [p]
             --TODO adjust this for annotations
             c <- return $ ex (vars fragment) (clet [monoscheme (typeEnv fragment)]
-                                             (typeConstraint fragment /\ c2 ))
-            let retConstr = cMatch /\ c /\ tipe === (targ =-> tbody)
-            return $ trace ("LAMBDA constr: " ++ showConstr retConstr ++ "***\n\n")  $ retConstr
+                                             ( c2 ))
+            let retConstr = typeConstraint fragment /\ cMatch /\ c /\ tipe === (targ =-> tbody)
+            return retConstr
           
       App e1 e2 -> 
           exists $ \t -> do
@@ -125,13 +135,14 @@ constrain env (A region expr) tipe = trace (" Constrain " ++ (show $ pretty expr
             ce <- constrain env ex texp
             canMatchConstr <-
                 Pattern.allMatchConstraints texp region (map fst branches)
+            canMatchType <- Pattern.typeForPatList region (map fst branches)
             let branchConstraints (p,e) =
-                  exists $ \retAnnot -> do
+                  exists $ \retAnnot -> 
+                  exists $ \patType -> do
                     --let recType = _
-                    fragment <- try region $ Pattern.constrain  env p texp
+                    fragment <- try region $ Pattern.constrain  env p patType --texp
                     letConstr <- clet [toScheme fragment] <$> constrain env e retAnnot 
-                    return $ trace ("Case branch constr: " ++ showConstr letConstr)
-                      $ letConstr  /\ retAnnot === tipe
+                    return $ letConstr  /\ retAnnot === tipe
             resultConstr <- and . (:) ce <$> mapM branchConstraints branches
             return $ canMatchConstr /\ resultConstr
 

@@ -19,8 +19,8 @@ import qualified Type.Constrain.Literal as Literal
 
 import qualified Type.PrettyPrint as TP
 
-import Debug.Trace (trace, traceStack)
---trace _ x = x
+--import Debug.Trace (trace, traceStack)
+trace _ x = x
 
 emptyRec = termN EmptyRecord1
 

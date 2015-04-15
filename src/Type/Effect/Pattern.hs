@@ -21,8 +21,8 @@ import qualified Data.List as List
 
 import qualified Type.PrettyPrint as TP
 
-import Debug.Trace (trace)
---trace _ x = x
+--import Debug.Trace (trace)
+trace _ x = x
 
 constrain :: Environment -> P.CanonicalPattern -> Type
           -> ErrorT (A.Region -> PP.Doc) IO Fragment
@@ -203,12 +203,13 @@ allMatchConstraints argType region patList = do
   return $ trace ("!!! Pattern match type : " ++ show (TP.pretty TP.App typeCanMatch) ) $ (argType === typeCanMatch)
     where t1 === t2 = A.A region (CEqual t1 t2)
 
+
 typeForPatList
   :: A.Region -> [P.CanonicalPattern]
     -> ErrorT [PP.Doc] IO Type
 typeForPatList region patList =
   if any containsWildcard patList
-     then anyVar
+     then trace "WILDCARD FOUND" $ anyVar
      else eachCtorHelper (sortByCtor patList)  
   where
     anyVar = do
