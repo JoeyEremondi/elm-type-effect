@@ -79,7 +79,7 @@ constrain env (A region expr) tipe = trace (" Constrain " ++ (show $ pretty expr
       Range lo hi -> return true -- "TODO implement"
       
       ExplicitList exprs -> return true -- "TODO implement"
-
+      
       --Treat binops just like functions at the type level
       --TODO is this okay?
       Binop op e1 e2 -> do
@@ -91,38 +91,36 @@ constrain env (A region expr) tipe = trace (" Constrain " ++ (show $ pretty expr
       --Nothing fancy goes on here, we just get the annotation for the pattern
       --And the possible constructors for the result, and bind them into a function type
       Lambda p e ->
-          existsNamed "lambdaArg" $ \targ ->
-          existsNamed "lambdaBody" $ \tbody -> do
+          exists $ \targ ->
+          exists $ \tbody -> do
             fragment <- try region $ Pattern.constrain env p targ
             --TODO constrain arg types
-            cBody <- trace ("LAMBDA " ++ (show region) ++ "\nBODY CONSTR" ++ (showConstr $ typeConstraint fragment) ++ "\n" ++ show (map (TP.pretty TP.Never) $ vars fragment )) $ constrain env e tbody
+            c2 <- constrain env e tbody
             --Make sure the argument type is only the patterns matched
             cMatch <- Pattern.allMatchConstraints targ region [p]
             --TODO adjust this for annotations
             c <- return $ ex (vars fragment) (clet [monoscheme (typeEnv fragment)]
-                                             (typeConstraint fragment /\ cBody ))
-            let retConstr = tipe === (targ =-> tbody) /\ cMatch /\ c 
-            return retConstr
+                                             (typeConstraint fragment /\ c2 ))
+            let retConstr = cMatch /\ c /\ tipe === (targ =-> tbody)
+            return $ trace ("LAMBDA constr: " ++ showConstr retConstr ++ "***\n\n")  $ retConstr
           
-      App e1 e2 -> trace ("APP: " ++ show region) $
-          existsNamed "appArg" $ \tArg -> do
-            c1 <- constrain env e1 (tArg =-> tipe)
-            c2 <- constrain env e2 tArg --TODO where do we speicify direction of subtyping?
-            trace ("APP constr: " ++ show region ++ "\nC1: " ++ showConstr c1 ++ "\nC2 " ++ showConstr c2) $ return $ c1 /\ c2 
+      App e1 e2 -> 
+          exists $ \t -> do
+            c1 <- constrain env e1 (t =-> tipe)
+            c2 <- constrain env e2 t --TODO where do we speicify direction of subtyping?
+            return $ c1 /\ c2
 
-      MultiIf branches ->
-        exists $ \tAllBranches -> do
-          and <$> mapM (constrain' tAllBranches) branches
+      MultiIf branches ->  and <$> mapM constrain' branches
           where
               --Ensure each branch has the same type as the overall expr
              --TODO ensure True is in a guard?
-             constrain' t (b,e) = (constrain env e t)
+             constrain' (b,e) = (constrain env e tipe)
                   
                   
       --TODO how does data flow from Exp to Sub-exp when matched ?
       Case ex branches -> trace ("CASE: Type " ++ show (TP.pretty TP.App tipe)) $
-          existsNamed "caseExp" $ \texp ->
-          existsNamed "caseResult" $ \tReturn -> do
+          exists $ \texp ->
+          exists $ \tReturn -> do
             --t is the type of the expression we match against 
             ce <- constrain env ex texp
             canMatchConstr <-
@@ -138,16 +136,19 @@ constrain env (A region expr) tipe = trace (" Constrain " ++ (show $ pretty expr
             return $ canMatchConstr /\ resultConstr
 
 
-      Data rawName [] -> constrainCtor region env rawName tipe
+      Data rawName [] -> trace ("DATA single " ++ rawName) $ constrainCtor region env rawName tipe
 
       --We treat constructor application with args as a function call
       Data rawName args -> trace "DATA multi " $ do
+        --let name =
+        --      if ('.' `elem` rawName)
+        --      then rawName
+        --      else ("Main." ++ rawName )  --TODO what if not in main?
         exists $ \ctorType -> do
           let ctorExp = (A region $ Data rawName [])
-          ctorConstrs <- constrainCtor region env rawName ctorType
-          --ctorExpConstrs <- constrain env ctorExp ctorType
+          ctorConstrs <- constrain env ctorExp ctorType
           fnConstrs <- constrain env (foldApp ctorExp args) tipe
-          trace ("DATA multi constr: "  ++ showConstr (ctorConstrs /\ fnConstrs )) $ return $ ctorConstrs /\ fnConstrs
+          return $ ctorConstrs /\ fnConstrs
         where
           foldApp fn [] = fn
           foldApp fn (arg:argRest) = foldApp (A region $ App fn arg) argRest
@@ -176,25 +177,7 @@ constrain env (A region expr) tipe = trace (" Constrain " ++ (show $ pretty expr
 
       PortOut _ _ signal -> return true -- "TODO implement"
 
-constrainDef :: Region
-                  -> Env.Environment
-                  -> ([Scheme Type Variable],
-                      [Variable],
-                      [Variable],
-                      Map.Map String (TermN Variable),
-                      Constraint Type Variable,
-                      TypeConstraint)
-                  -> Canonical.Def
-                  -> ErrorT
-                       [PP.Doc]
-                       IO
-                       ([Scheme Type Variable],
-                        [Variable],
-                        [Variable],
-                        Map.Map String (TermN Variable),
-                        Constraint Type Variable,
-                        TypeConstraint)
-constrainDef _region env info (Canonical.Definition pattern expr _maybeTipe) =
+constrainDef region env info (Canonical.Definition pattern expr maybeTipe) =
     let qs = [] -- should come from the def, but I'm not sure what would live there...
         (schemes, rigidQuantifiers, flexibleQuantifiers, headers, c2, c1) = info
     in
@@ -202,13 +185,12 @@ constrainDef _region env info (Canonical.Definition pattern expr _maybeTipe) =
                                                        -- Currently, qs is always [].
        case pattern of
          (P.Var name) -> do
-             v <- liftIO $ namedVar Flexible (V.Canonical V.Local name ) 
+             v <- liftIO $ variable Flexible
              let tipe = varN v
                  inserts = zipWith (\arg typ -> Map.insert arg (varN typ)) qs rigidVars
                  env' = env { Env.value = List.foldl' (\x f -> f x) (Env.value env) inserts }
              c <- constrain env' expr tipe
-             trace ("##LET " ++ (name) ++ "\nC" ++ showConstr c ++ "\nC2 " ++ showConstr c2 ++ "\nC1 " ++ showConstr c1 ) $
-               return ( schemes
+             return ( schemes
                     , rigidVars ++ rigidQuantifiers
                     , v : flexibleQuantifiers
                     , Map.insert name tipe headers
@@ -238,7 +220,7 @@ try region computation =
         Right value -> return value
 
 --TODO how to make this polyvariant?
-constrainCtor region env rawName tipe = trace "Constrain CTOR " $ do
+constrainCtor region env rawName tipe = trace "DATA one " $ do
         let qualName =
               if ('.' `elem` rawName)
               then rawName
@@ -257,8 +239,7 @@ constrainCtor region env rawName tipe = trace "Constrain CTOR " $ do
                       then error $ "Name " ++ (show rawName) ++ " not in dict " ++ show (Map.keys ctorDict)
                       else head possibleKeys
         (arity,typeVars,_,_) <- liftIO $ Env.get env Env.constructor theKey 
-        ctorConstr <- doWithArgTypes typeVars theKey arity []
-        trace ("Ctor Constr: " ++ showConstr ctorConstr ) $ return ctorConstr
+        doWithArgTypes typeVars theKey arity []
         where
           
           doWithArgTypes typeVars nm 0 argTypes =
