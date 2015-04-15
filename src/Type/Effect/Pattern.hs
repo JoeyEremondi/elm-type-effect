@@ -28,19 +28,29 @@ constrain :: Environment -> P.CanonicalPattern -> Type
           -> ErrorT (A.Region -> PP.Doc) IO Fragment
 constrain env pattern tipe = 
     let region = A.None (pretty pattern)
+        newVar = varN `fmap` (liftIO $ variable Flexible)
         t1 === t2 = A.A region (CEqual t1 t2)
-        genSubTypeConstr ty argList num constr = trace ("Pattern constr " ++ show (map (TP.pretty TP.App) argList ) ++ "\nregion " ++ show region) $
-          case argList of
-                [] -> return constr
-                (argTy:rest) ->
-                  exists $ \restOfRec -> do
-                  --exists $ \fieldType -> do
-                    let
-                      n :: Int
-                      n = num
-                    let ourFieldConstr = ty === (directRecord [("_sub" ++ show n, argTy)] restOfRec)
-                    let newConstr = constr /\ ourFieldConstr
-                    genSubTypeConstr ty rest (n+1) newConstr
+        --genSubTypeConstr :: Type -> [P.CanonicalPattern] -> Int -> TypeConstraint -> TypeConstraint
+        genSubTypeConstr ty patList num frag = do
+          let thePatList :: [P.CanonicalPattern]
+              thePatList = patList
+          case patList of
+                [] -> return frag
+                (currentPat:rest) -> do
+                  fieldAnnot <- newVar
+                  let
+                          n :: Int
+                          n = num
+                  ourFieldFrag <- constrain env currentPat fieldAnnot
+                  newConstr <-
+                      exists $ \restOfRec -> do
+                      --exists $ \fieldAnnot -> do
+                        let constr = typeConstraint frag 
+                        
+                        let ourFieldConstr = ty === (directRecord [("_sub" ++ show n, fieldAnnot)] restOfRec)
+                        return $ constr /\ ourFieldConstr
+                  let newFrag = joinFragments [frag, ourFieldFrag {typeConstraint = newConstr}]
+                  genSubTypeConstr ty rest (n+1) newFrag
     in
     case pattern of
       P.Anything -> return emptyFragment
@@ -59,17 +69,20 @@ constrain env pattern tipe =
 
       P.Alias name p -> do
           v <- liftIO $ variable Flexible
+          let varType = varN v
           fragment <- constrain env p tipe
+          --TODO this case? Constrain alias?
           return $ fragment
-            { typeEnv = Map.insert name (varN v) (typeEnv fragment)
+            { typeEnv = Map.insert name varType (typeEnv fragment)
             , vars    = v : vars fragment
-            , typeConstraint = varN v === tipe /\ typeConstraint fragment
+            , typeConstraint = varType === tipe /\ typeConstraint fragment
             }
 
       P.Data name patterns -> do
           --TODO is this the right args?
           (kind, cvars, args, result) <- liftIO $ freshDataScheme env (V.toString name)
-          fragment <- Monad.liftM joinFragments (Monad.zipWithM (constrain env) patterns args)
+          argTypes <- mapM (\_ -> newVar) args
+          fragment <- Monad.liftM joinFragments (Monad.zipWithM (constrain env) patterns argTypes)
           let
               
           recordStructureConstr <-
@@ -77,7 +90,9 @@ constrain env pattern tipe =
             exists $ \restOfRec -> do
              let ctorFieldConstr =
                    trace "mkAnnot2" $ tipe === directRecord [("_" ++ V.toString name, recordSubType )] restOfRec
-             argTypesConstr <- genSubTypeConstr recordSubType args 1 $ A.A region CTrue
+             
+             argTypesFrag <- genSubTypeConstr recordSubType patterns 1 emptyFragment
+             let argTypesConstr = typeConstraint argTypesFrag
              return $ ctorFieldConstr /\ argTypesConstr
              --genSubTypeConstr tipe args 1 $ A.A region CTrue
             --return $ tipe === mkRecord [("_" ++ V.toString name, args )] restOfRec
@@ -163,8 +178,8 @@ sortByCtor patList =
     maybeAddName name pat subPatList = case pat of
       P.Data name2 pats -> if (name == ctorName pat) then (pats : subPatList) else subPatList
       (P.Record e) -> subPatList
-      (P.Alias e1 e2) -> subPatList
-      (P.Var e) -> subPatList --Ignore these, we should catch this earlier
+      (P.Alias e1 e2) -> maybeAddName name e2 subPatList
+      (P.Var e) -> subPatList --Ignor naze these, we should catch this earlier
       P.Anything -> subPatList --Ignore these, we should catch this earlier
       (P.Literal e) -> subPatList
     sortedPats = [ (ctor, List.transpose $ foldr (maybeAddName ctor) [] patList) | ctor <- allNames]
@@ -185,7 +200,7 @@ containsWildcard pat =
 
 allMatchConstraints argType region patList = do
   typeCanMatch <- typeForPatList region patList
-  return $ trace ("Pattern match type : " ++ show (TP.pretty TP.App typeCanMatch) ) $ (argType === typeCanMatch)
+  return $ trace ("!!! Pattern match type : " ++ show (TP.pretty TP.App typeCanMatch) ) $ (argType === typeCanMatch)
     where t1 === t2 = A.A region (CEqual t1 t2)
 
 typeForPatList

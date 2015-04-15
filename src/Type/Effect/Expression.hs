@@ -80,12 +80,13 @@ constrain env (A region expr) tipe = trace (" Constrain " ++ (show $ pretty expr
       
       ExplicitList exprs -> return true -- "TODO implement"
       
-      Binop op e1 e2 ->
-          exists $ \t1 ->
-          exists $ \t2 -> do
-            c1 <- constrain env e1 t1
-            c2 <- constrain env e2 t2
-            return $ and [ c1, c2, V.toString op <? (t1 =-> t2 =-> tipe) ]
+      --Treat binops just like functions at the type level
+      --TODO is this okay?
+      Binop op e1 e2 -> do
+        let opFn = A region $ Var op
+        let fn1 = A region $ App opFn e1
+        let fnVersion = A region $ App fn1 e2
+        constrain env fnVersion tipe
 
       --Nothing fancy goes on here, we just get the annotation for the pattern
       --And the possible constructors for the result, and bind them into a function type
