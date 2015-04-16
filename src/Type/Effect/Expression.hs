@@ -27,9 +27,9 @@ import Data.Char (isUpper)
 
 import Type.Effect.Common
 
---import Debug.Trace (trace)
+import Debug.Trace (trace)
 
-trace _ x = x
+--trace _ x = x
 t1 =-> t2 = closedAnnot [("_Lambda", [t1, t2])]
 
 constrain
@@ -46,6 +46,7 @@ constrain env (A region expr) tipe = trace (" Constrain " ++ (show $ pretty expr
          --We override this for our fn def
         x <? t = A region (CInstance x t)
         clet schemes c = A region (CLet schemes c)
+        newVar = varN `fmap` (liftIO $ variable Flexible)
         
         --emptyRec = termN EmptyRecord1
         bool = Env.get env Env.types "Bool"
@@ -54,6 +55,11 @@ constrain env (A region expr) tipe = trace (" Constrain " ++ (show $ pretty expr
           exists $ \tArg ->
           exists $ \tBody ->
             return $ (t === (tArg =-> tBody))
+        ifValidElse c1 c2 = trace ("IFCONSTR constr " ++ showConstr c1 ) $ liftIO $ do
+          isValid <- constraintOccursCheck _ c1
+          case isValid of
+            True -> trace "IFCONSTR SUCCESS " $ return c1
+            False -> trace "IFCONSTR FAIL " $  return c2
         
         
     in
@@ -153,19 +159,27 @@ constrain env (A region expr) tipe = trace (" Constrain " ++ (show $ pretty expr
             canMatchConstr <-
                 Pattern.allMatchConstraints env texp region (map fst branches)
             canMatchType <- Pattern.typeForPatList env region (map fst branches)
-            let branchConstraints (p,e) =
-                  exists $ \retAnnot -> 
-                  exists $ \patType -> do
+            isTopConstr <- isTop tipe
+            let branchConstraints (p,e) = do
+                    retAnnot <- newVar  
+                    patType <- newVar
                     --let recType = _
                     fragment <- try region $ Pattern.constrain  env p patType --texp
-                    letConstr <- clet [toScheme fragment] <$> constrain env e retAnnot 
-                    return $ letConstr -- /\ retAnnot === tipe
-            resultConstr <- and . (:) ce <$> mapM branchConstraints branches
+                    letConstr <- clet [toScheme fragment] <$> constrain env e retAnnot
+                    --localRetConstr <- ifValidElse (retAnnot === tipe /\ letConstr) isTopConstr
+                    return $ (letConstr, retAnnot === tipe /\ letConstr)
+            branchPairs <- mapM branchConstraints branches
+            let branchConstr = and $ map fst branchPairs
+            let maybeResultConstr = and $ map snd branchPairs
+
+            let forSureConstr = ce /\ canMatchConstr /\ branchConstr
+            
+            resultConstr <- ifValidElse (maybeResultConstr /\ forSureConstr) (forSureConstr /\ isTopConstr)
+            
             --We can get infinite types if we try to combine our branches
             --So we always assume we return top
             --TODO better solution?
-            isTopConstr <- isTop tipe
-            return $ canMatchConstr /\ resultConstr /\ isTopConstr --TODO more precise?
+            return resultConstr --TODO more precise?
 
 
       Data rawName [] -> trace ("DATA single " ++ rawName) $ constrainCtor region env rawName tipe

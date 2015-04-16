@@ -23,12 +23,13 @@ import Control.Arrow (first, second)
 import Control.Monad.State (execStateT, forM)
 import Control.Monad.Error (ErrorT, runErrorT, liftIO, throwError)
 import qualified Type.PrettyPrint as TP
+import qualified Type.Fragment as Fragment
 
 import System.IO.Unsafe  -- Possible to switch over to the ST monad instead of
                          -- the IO monad. I don't think that'd be worthwhile.
 
---import Debug.Trace (trace)
-trace _ x = x
+import Debug.Trace (trace)
+--trace _ x = x
 
 infer
   :: Interfaces
@@ -98,7 +99,7 @@ genTotalityConstraints interfaces modul =
       let env = normalEnv {Env.types = Map.fromList $ zip tyNames newTypes }
 
       fvar <- liftIO $ T.variable T.Flexible
-      c <- trace "Going into EfExpr" $ EfExpr.constrain env (program (body modul)) (T.varN fvar)
+      c <- trace "Going into EfExpr" $ EfExpr.constrain env (program (body modul)) (T.varN fvar) 
       
       ctors <- trace "Done EfExpr?" $ forM (Map.keys (Env.constructor env)) $ \name -> do
                  (_, vars, args, result) <- liftIO $ Env.freshDataScheme env name
