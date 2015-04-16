@@ -249,11 +249,11 @@ recordUnify region fresh variable1 variable2 = trace ("REC Unifying records " ++
         (Empty _, Empty _) ->
             case Map.null uniqueFields1 && Map.null uniqueFields2 of
               True -> return ()
-              False -> typeError region Nothing variable1 variable2
+              False -> trace "RecErr1" $ typeError region Nothing variable1 variable2
 
         (Empty var1, Extension var2) ->
             case (Map.null uniqueFields1, Map.null uniqueFields2) of
-              (_, False) -> addFieldMismatchError uniqueFields2
+              (_, False) -> trace ("RecErr2 " ++ show (Map.keys uniqueFields2)) $ addFieldMismatchError uniqueFields2
               (True, True) -> unifyHelp region var1 var2
               (False, True) ->
                 do  subRecord <- freshRecord uniqueFields1 var1
@@ -261,7 +261,7 @@ recordUnify region fresh variable1 variable2 = trace ("REC Unifying records " ++
 
         (Extension var1, Empty var2) ->
             case (Map.null uniqueFields1, Map.null uniqueFields2) of
-              (False, _) -> addFieldMismatchError uniqueFields1
+              (False, _) -> trace "RecErr3" $ addFieldMismatchError uniqueFields1
               (True, True) -> unifyHelp region var1 var2
               (True, False) ->
                 do  subRecord <- freshRecord uniqueFields2 var2

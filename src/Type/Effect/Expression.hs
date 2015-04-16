@@ -96,9 +96,16 @@ constrain env (A region expr) tipe = trace (" Constrain " ++ (show $ pretty expr
       Range lo hi -> return true -- "TODO implement"
 
       ExplicitList [] -> exists $ \restOfRec ->
-        return $ tipe === mkAnnot [("[]", [])] restOfRec
+        return $ tipe === mkAnnot [("_[]", [])] restOfRec
       
-      ExplicitList exprs -> return true -- "TODO implement"
+      ExplicitList (firstExp:others) ->
+        exists $ \restOfRec ->
+        exists $ \exprType ->
+        exists $ \subListType -> do
+          exprConstr <- constrain env firstExp exprType
+          subListConstr <- constrain env (A region $ ExplicitList others) subListType
+          let isConsConstr = tipe === mkAnnot [("_::", [exprType, subListType])] restOfRec
+          return $ exprConstr /\ subListConstr /\ isConsConstr
       
       --Treat binops just like functions at the type level
       --TODO is this okay?
