@@ -49,7 +49,11 @@ constrain env (A region expr) tipe = trace (" Constrain " ++ (show $ pretty expr
         
         --emptyRec = termN EmptyRecord1
         bool = Env.get env Env.types "Bool"
-        top = Env.get env Env.types "Int"
+        --top = Env.get env Env.types "Int"
+        isTop t =
+          exists $ \tArg ->
+          exists $ \tBody ->
+            return $ (t === (tArg =-> tBody))
         
         
     in
@@ -69,7 +73,10 @@ constrain env (A region expr) tipe = trace (" Constrain " ++ (show $ pretty expr
       GLShader _uid _src gltipe -> return true -- "TODO implement"
 
 
-      Var (V.Canonical (V.Module ("Native":_)) _) -> return true
+      --Native can be any function, but we always make it a function
+      --Meaning for non-function values, we MUST match against it with _
+      --This deals with the fact that there are infinite integer constructors
+      Var (V.Canonical (V.Module ("Native":_)) _) -> isTop tipe
       --Special case: Native is a Rigid type variable, could be anything
       {-
       Var (V.Canonical (V.Module ("Native":_)) _) -> do
@@ -87,6 +94,9 @@ constrain env (A region expr) tipe = trace (" Constrain " ++ (show $ pretty expr
             name = V.toString var
 
       Range lo hi -> return true -- "TODO implement"
+
+      ExplicitList [] -> exists $ \restOfRec ->
+        return $ tipe === mkAnnot [("[]", [])] restOfRec
       
       ExplicitList exprs -> return true -- "TODO implement"
       
@@ -147,7 +157,8 @@ constrain env (A region expr) tipe = trace (" Constrain " ++ (show $ pretty expr
             --We can get infinite types if we try to combine our branches
             --So we always assume we return top
             --TODO better solution?
-            return $ canMatchConstr /\ resultConstr /\ (tipe === top) --TODO more precise?
+            isTopConstr <- isTop tipe
+            return $ canMatchConstr /\ resultConstr /\ isTopConstr --TODO more precise?
 
 
       Data rawName [] -> trace ("DATA single " ++ rawName) $ constrainCtor region env rawName tipe

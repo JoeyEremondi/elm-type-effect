@@ -16,13 +16,13 @@ import Type.Type
 import Type.PrettyPrint
 import qualified Type.Hint as Hint
 import Elm.Utils ((|>))
---import Debug.Trace (trace)
+import Debug.Trace (trace)
 
-trace _ x = x
+--trace _ x = x
 
 
 unify :: A.Region -> Variable -> Variable -> StateT TS.SolverState IO ()
-unify region variable1 variable2 = trace "Top unify" $ 
+unify region variable1 variable2 = 
   do  result <- runErrorT (unifyHelp region variable1 variable2)
       either TS.addHint return result
 
@@ -38,13 +38,13 @@ typeError
     -> UF.Point Descriptor
     -> UF.Point Descriptor
     -> Unify a
-typeError region hint t1 t2 = trace "TYPE ERROR MSG" $
+typeError region hint t1 t2 = 
   do  msg <- liftIO (Hint.create region hint t1 t2)
       throwError msg
 
 
 unifyHelp :: A.Region -> Variable -> Variable -> Unify ()
-unifyHelp region variable1 variable2 = trace "Unify Help" $ do
+unifyHelp region variable1 variable2 = do
   equivalent <- liftIO $ UF.equivalent variable1 variable2
   if equivalent
       then return ()
@@ -52,18 +52,18 @@ unifyHelp region variable1 variable2 = trace "Unify Help" $ do
 
 
 actuallyUnify :: A.Region -> Variable -> Variable -> Unify ()
-actuallyUnify region variable1 variable2 = trace "Actual unify" $ do
+actuallyUnify region variable1 variable2 = do
   desc1 <- liftIO $ UF.descriptor variable1
   desc2 <- liftIO $ UF.descriptor variable2
   let unifyHelp' = unifyHelp region
 
       (name', flex', rank', alias') =
         let
-          ret = trace "U1" $ combinedDescriptors desc1 desc2
-        in trace "Got combined" $ ret
+          ret = combinedDescriptors desc1 desc2
+        in ret
 
       merge1 :: Unify ()
-      merge1 = trace "U2" $ liftIO $ do
+      merge1 = liftIO $ do
         if rank desc1 < rank desc2 then UF.union variable2 variable1
                                    else UF.union variable1 variable2
         UF.modifyDescriptor variable1 $ \desc ->
@@ -74,7 +74,7 @@ actuallyUnify region variable1 variable2 = trace "Actual unify" $ do
                  }
 
       merge2 :: Unify ()
-      merge2 = trace "U3" $ liftIO $ do
+      merge2 = liftIO $ do
         if rank desc1 < rank desc2 then UF.union variable2 variable1
                                    else UF.union variable1 variable2
         UF.modifyDescriptor variable2 $ \desc ->
@@ -87,7 +87,7 @@ actuallyUnify region variable1 variable2 = trace "Actual unify" $ do
       merge = if rank desc1 < rank desc2 then merge1 else merge2
 
       fresh :: Maybe (Term1 Variable) -> Unify Variable
-      fresh structure = trace "U4" $ do
+      fresh structure =  do
         v <- liftIO . UF.fresh $ Descriptor
              { structure = structure
              , rank = rank'
@@ -99,11 +99,11 @@ actuallyUnify region variable1 variable2 = trace "Actual unify" $ do
              }
         lift (TS.register v)
 
-      flexAndUnify v = trace "U5" $ do
+      flexAndUnify v = do
         liftIO $ UF.modifyDescriptor v $ \desc -> desc { flex = Flexible }
         unifyHelp' variable1 variable2
 
-      unifyNumber svar (Var.Canonical home name) = trace "U6" $ 
+      unifyNumber svar (Var.Canonical home name) =  
           case home of
             Var.BuiltIn | name `elem` ["Int","Float"]   -> flexAndUnify svar
             Var.Local   | List.isPrefixOf "number" name -> flexAndUnify svar
@@ -112,27 +112,27 @@ actuallyUnify region variable1 variable2 = trace "Actual unify" $ do
               in
                   typeError region (Just hint) variable1 variable2
 
-      comparableError maybe = trace "U7" $ 
+      comparableError maybe =  
           typeError region (Just $ Maybe.fromMaybe msg maybe) variable1 variable2
         where
           msg =
             "Looks like you want something comparable, but the only valid comparable\n\
             \types are Int, Float, Char, String, lists, or tuples."
 
-      appendableError maybe = trace "U8" $ 
+      appendableError maybe =  
           typeError region (Just $ Maybe.fromMaybe msg maybe) variable1 variable2
         where
           msg =
             "Looks like you want something appendable, but the only Strings, Lists,\n\
             \and Text can be appended with the (++) operator."
 
-      unifyComparable v (Var.Canonical home name) = trace "U9" $ 
+      unifyComparable v (Var.Canonical home name) =  
           case home of
             Var.BuiltIn | name `elem` ["Int","Float","Char","String"] -> flexAndUnify v
             Var.Local   | List.isPrefixOf "comparable" name           -> flexAndUnify v
             _ -> comparableError Nothing
 
-      unifyComparableStructure varSuper varFlex = trace "U10" $ 
+      unifyComparableStructure varSuper varFlex =  
           do struct <- liftIO $ collectApps varFlex
              case struct of
                Other -> comparableError Nothing
@@ -146,13 +146,13 @@ actuallyUnify region variable1 variable2 = trace "Actual unify" $ do
                           cmpVars <- liftIO $ forM [1..length vs] $ \_ -> variable (Is Comparable)
                           zipWithM_ unifyHelp' vs cmpVars
 
-      unifyAppendable varSuper varFlex = trace "U11" $ 
+      unifyAppendable varSuper varFlex =  
           do struct <- liftIO $ collectApps varFlex
              case struct of
                List _ -> flexAndUnify varSuper
                _      -> appendableError Nothing
 
-      rigidError var = trace "U12" $ 
+      rigidError var =  
           typeError region (Just hint) variable1 variable2
         where
           hint =
@@ -160,7 +160,7 @@ actuallyUnify region variable1 variable2 = trace "Actual unify" $ do
             "The problem probably relates to the type variable being shared between a\n\
             \top-level type annotation and a related let-bound type annotation."
 
-      superUnify = trace "U13" $ 
+      superUnify =  
           case (flex desc1, flex desc2, name desc1, name desc2) of
             (Is super1, Is super2, _, _)
                 | super1 == super2 -> merge
@@ -186,7 +186,7 @@ actuallyUnify region variable1 variable2 = trace "Actual unify" $ do
             (_, Rigid, _, _) -> rigidError variable2
             _ -> typeError region Nothing variable1 variable2
 
-  trace "U14" $ case (structure desc1, structure desc2) of
+  case (structure desc1, structure desc2) of
     (Nothing, Nothing) | flex desc1 == Flexible && flex desc1 == Flexible -> merge
     (Nothing, _) | flex desc1 == Flexible -> merge2
     (_, Nothing) | flex desc2 == Flexible -> merge1
@@ -293,14 +293,14 @@ unifyOverlappingFields
     -> Map.Map String [Variable]
     -> Unify ()
 unifyOverlappingFields region fields1 fields2 =  
-    trace "Field Overlap" (Map.intersectionWith (zipWith (unifyHelp region)) fields1 fields2
+    Map.intersectionWith (zipWith (unifyHelp region)) fields1 fields2
         |> Map.elems 
         |> concat
-        |> sequence_)
+        |> sequence_
 
 
 diffFields :: Map.Map String [a] -> Map.Map String [a] -> Map.Map String [a]
-diffFields fields1 fields2 = trace "Diff Fields" $
+diffFields fields1 fields2 = 
   let eat (_:xs) (_:ys) = eat xs ys
       eat xs _ = xs
   in
@@ -317,7 +317,7 @@ data Extension = Empty Variable | Extension Variable
 
 
 gatherFields :: Variable -> IO ExpandedRecord
-gatherFields var = trace "Gather Fields" $ 
+gatherFields var =  
   do  desc <- UF.descriptor var
       case structure desc of
         (Just (Record1 fields ext)) ->
@@ -333,7 +333,7 @@ gatherFields var = trace "Gather Fields" $
 
 -- assumes that one of the dicts has stuff in it
 fieldMismatchError :: Map.Map String a -> String
-fieldMismatchError missingFields = trace "Field mismatch" $ 
+fieldMismatchError missingFields =  
     case Map.keys missingFields of
       [] -> ""
       [key] ->
@@ -346,17 +346,17 @@ fieldMismatchError missingFields = trace "Field mismatch" $
 
 combinedDescriptors :: Descriptor -> Descriptor
                     -> (Maybe Var.Canonical, Flex, Int, Maybe Var.Canonical)
-combinedDescriptors desc1 desc2 = trace "Combine Desc" $
+combinedDescriptors desc1 desc2 = 
     (name', flex', rank', alias')
   where
     rank' :: Int
-    rank' = trace "C1" $  min (rank desc1) (rank desc2)
+    rank' =  min (rank desc1) (rank desc2)
 
     alias' :: Maybe Var.Canonical
-    alias' = trace "C2" $  (trace ("ALT1 " ++ show (alias desc1)) $ alias desc1) <|> (trace ("ALT2 " ++ show (alias desc2)) $ alias desc2)
+    alias' = alias desc1 <|> alias desc2
 
     name' :: Maybe Var.Canonical
-    name' = trace "C3" $ case (name desc1, name desc2) of
+    name' = case (name desc1, name desc2) of
               (Just name1, Just name2) ->
                   case (flex desc1, flex desc2) of
                     (_, Flexible)     -> Just name1
@@ -370,7 +370,7 @@ combinedDescriptors desc1 desc2 = trace "Combine Desc" $
               _ -> Nothing
 
     flex' :: Flex
-    flex' = trace "C4" $ case (flex desc1, flex desc2) of
+    flex' = case (flex desc1, flex desc2) of
               (f, Flexible)     -> f
               (Flexible, f)     -> f
               (Is Number, Is _) -> Is Number

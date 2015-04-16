@@ -234,9 +234,9 @@ type1Equal t1 t2 = case (t1, t2) of
 
 --Check if two types are literally identical
 typeNEqual :: Type -> Type -> Bool
-typeNEqual t1 t2 = case (t1, t2) of
-  (VarN v1 t1, VarN v2 t2) -> (v1 == v2) && (t1 == t2) 
-  (TermN v1 t1, TermN v2 t2) -> (v1 == v2) && (type1Equal t1 t2)
+typeNEqual t1 t2 = trace ("Comparing " ++ (show $ TP.pretty TP.Never t1  ) ++ " and " ++ ((show $ TP.pretty TP.Never t2  ) ) ) $ case (t1, t2) of
+  (VarN v1 t1, VarN v2 t2) -> True 
+  (TermN v1 t1, TermN v2 t2) -> {-(v1 == v2) && -}  (type1Equal t1 t2)
   _ -> False
 
 --toMain s = if (elem '.' s) then s else ("Main." ++ s)
@@ -253,15 +253,18 @@ checkIfTotal env patList = do
         Nothing -> error $ "Key " ++ show k ++ " not in " ++ show (Map.keys d)
         Just x -> x
   case hasWildcard of
-    True -> return True
+    True -> trace ("HAS WILDCARD " ++ show patList) $ return True
     False -> do
       let allCtors = constructor env
       let ctorNames = Map.keys allCtors
       ctorValues <- mapM liftIO $ Map.elems allCtors
       ourTypeInfo <- trace ("Ctor names " ++ show ctorNames ++ "\nmap Keys " ++ show (Map.keys allCtors) ) $ liftIO $ mapGet allCtors (tail $ fst $ head sortedPats) --remove underscore
       let (_,_,_,ourType) = ourTypeInfo
-      let ctorsForOurType =
-            map fst $ filter (\(nm, (_,_,_,tp)) -> typeNEqual tp ourType) $ zip ctorNames ctorValues
+      let
+        ctorsForOurType =
+            filter (/= "_Tuple1") $
+            map fst $
+            filter (\(nm, (_,_,_,tp)) -> typeNEqual tp ourType) $ zip ctorNames ctorValues
       
       let
         --ctorCovered :: Map.Map String [P.CanonicalPattern] -> String -> Bool
@@ -270,7 +273,7 @@ checkIfTotal env patList = do
               Nothing -> return False
               Just subPats -> List.and `fmap` mapM (checkIfTotal env) subPats
       coveredList <- mapM (ctorCovered $ Map.fromList sortedPats) ctorsForOurType
-      return $ List.and coveredList
+      return $ trace ("Ctors for our type: " ++ show ctorsForOurType ++ "\nCovered List " ++ show coveredList ) $ List.and coveredList
 
 typeForPatList
   :: Environment -> A.Region -> [P.CanonicalPattern]
@@ -278,8 +281,8 @@ typeForPatList
 typeForPatList env region patList = do
   isTotal <- checkIfTotal env patList
   if isTotal
-     then trace "WILDCARD FOUND" $ anyVar
-     else eachCtorHelper (sortByCtor patList)  
+     then trace ("IS TOTAL " ++ show patList) $ anyVar
+     else trace ("NOT TOTAL") $ eachCtorHelper (sortByCtor patList)  
   where
     anyVar = do
       newVar <- liftIO $ variable Flexible
