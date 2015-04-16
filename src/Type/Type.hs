@@ -16,6 +16,9 @@ import qualified AST.PrettyPrint as PP
 import qualified AST.Type as T
 import qualified AST.Variable as Var
 
+import System.CPUTime (getCPUTime)
+
+
 
 data Term1 a
     = App1 a a
@@ -86,8 +89,8 @@ monoscheme headers = Scheme [] [] (noneNoDocs CTrue) headers
 
 showType :: Type -> String
 showType t = case t of
-  (VarN Nothing ty2) -> "?" ++ (show $ mark $ unsafePerformIO $ UF.descriptor ty2) ++ "&"
-  (VarN (Just ty1) ty2) -> show $ Var.toString ty1
+  --(VarN Nothing ty2) -> "?" ++ (show $ mark $ unsafePerformIO $ UF.descriptor ty2) ++ "&"
+  --(VarN (Just ty1) ty2) -> show $ Var.toString ty1
   _ -> show $ pretty App t
 
 showVar t = show $ pretty App t
@@ -99,8 +102,8 @@ showConstr (A _ con) = case con of
   CSaveEnv -> "SAVE_ENV"
   (CEqual c1 c2) -> (showType c1 ) ++ " === " ++ (showType c2)
   (CAnd conList) -> "\n****" ++ (List.intercalate "\n" $ map showConstr conList)
-  (CLet vars c2) -> "Let " ++ (List.intercalate "\n" $ map showVar vars) ++ showConstr c2
-  (CInstance c1 c2) -> "INST"
+  (CLet schemes c2) -> "Let {{" ++ (List.intercalate "\n" $ map showVar schemes) ++ "}}[[" ++ showConstr c2 ++ "]]"
+  (CInstance c1 c2) -> "INST " ++ c1 ++ " < " ++ showType c2
 
 
 infixl 8 /\
@@ -178,11 +181,13 @@ namedVar flex name = UF.fresh $ Descriptor
 
 
 variable :: Flex -> IO Variable
-variable flex = UF.fresh $ Descriptor
+variable flex = do
+ currentTime <- (\x -> (x `quot` 1000000) `mod` 1000)`fmap` getCPUTime
+ UF.fresh $ Descriptor
   { structure = Nothing
   , rank = noRank
   , flex = flex
-  , name = Nothing
+  , name = Nothing --Just (Var.Canonical Var.Local $ "?" ++ show currentTime)
   , copy = Nothing
   , mark = noMark
   , alias = Nothing
@@ -504,7 +509,7 @@ toSrcType var =
             return $ case ext' of
                        T.Record fs ext -> T.Record (fs ++ fields) ext
                        T.Var _ -> T.Record fields (Just ext')
-                       _ -> error "Used toSrcType on a type that is not well-formed"
+                       _ -> error $ "Used toSrcType on a type that is not well-formed" ++ show ext'
 
     dealias :: T.CanonicalType -> T.CanonicalType
     dealias t =

@@ -99,7 +99,7 @@ genTotalityConstraints interfaces modul =
       let env = normalEnv {Env.types = Map.fromList $ zip tyNames newTypes }
 
       fvar <- liftIO $ T.variable T.Flexible
-      c <- trace "Going into EfExpr" $ EfExpr.constrain env (program (body modul)) (T.varN fvar) 
+      c <- trace "Going into EfExpr" $ EfExpr.constrain env (program (body modul)) (T.varN fvar) Fragment.emptyFragment 
       
       ctors <- trace "Done EfExpr?" $ forM (Map.keys (Env.constructor env)) $ \name -> do
                  (_, vars, args, result) <- liftIO $ Env.freshDataScheme env name

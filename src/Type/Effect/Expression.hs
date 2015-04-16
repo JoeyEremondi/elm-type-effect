@@ -36,8 +36,9 @@ constrain
     :: Env.Environment
     -> Canonical.Expr
     -> Type
+    -> Fragment
     -> ErrorT [PP.Doc] IO TypeConstraint
-constrain env (A region expr) tipe = trace (" Constrain " ++ (show $ pretty expr)) $
+constrain env (A region expr) tipe topFrag = trace (" Constrain " ++ (show $ pretty expr)) $
     let list t = Env.get env Env.types "List" <| t
         and = A region . CAnd
         true = A region CTrue
@@ -55,8 +56,9 @@ constrain env (A region expr) tipe = trace (" Constrain " ++ (show $ pretty expr
           exists $ \tArg ->
           exists $ \tBody ->
             return $ (t === (tArg =-> tBody))
-        ifValidElse c1 c2 = trace ("IFCONSTR constr " ++ showConstr c1 ) $ liftIO $ do
-          isValid <- constraintOccursCheck _ c1
+        
+        ifValidElse tenv c1 c2 = trace ("IFCONSTR constr " ++ showConstr c1 ) $ liftIO $ do
+          isValid <- constraintOccursCheck tenv c1 --TODO env
           case isValid of
             True -> trace "IFCONSTR SUCCESS " $ return c1
             False -> trace "IFCONSTR FAIL " $  return c2
@@ -108,8 +110,8 @@ constrain env (A region expr) tipe = trace (" Constrain " ++ (show $ pretty expr
         exists $ \restOfRec ->
         exists $ \exprType ->
         exists $ \subListType -> do
-          exprConstr <- constrain env firstExp exprType
-          subListConstr <- constrain env (A region $ ExplicitList others) subListType
+          exprConstr <- constrain env firstExp exprType topFrag
+          subListConstr <- constrain env (A region $ ExplicitList others) subListType topFrag
           let isConsConstr = tipe === mkAnnot [("_::", [exprType, subListType])] restOfRec
           return $ exprConstr /\ subListConstr /\ isConsConstr
       
@@ -119,7 +121,7 @@ constrain env (A region expr) tipe = trace (" Constrain " ++ (show $ pretty expr
         let opFn = A region $ Var op
         let fn1 = A region $ App opFn e1
         let fnVersion = A region $ App fn1 e2
-        constrain env fnVersion tipe
+        constrain env fnVersion tipe topFrag
 
       --Nothing fancy goes on here, we just get the annotation for the pattern
       --And the possible constructors for the result, and bind them into a function type
@@ -128,7 +130,7 @@ constrain env (A region expr) tipe = trace (" Constrain " ++ (show $ pretty expr
           exists $ \tbody -> do
             fragment <- try region $ Pattern.constrain env p targ
             --TODO constrain arg types
-            c2 <- constrain env e tbody
+            c2 <- constrain env e tbody (joinFragments [topFrag, fragment])
             --Make sure the argument type is only the patterns matched
             cMatch <- Pattern.allMatchConstraints env targ region [p]
             --TODO adjust this for annotations
@@ -139,15 +141,15 @@ constrain env (A region expr) tipe = trace (" Constrain " ++ (show $ pretty expr
           
       App e1 e2 -> 
           exists $ \t -> do
-            c1 <- constrain env e1 (t =-> tipe)
-            c2 <- constrain env e2 t --TODO where do we speicify direction of subtyping?
+            c1 <- constrain env e1 (t =-> tipe) topFrag
+            c2 <- constrain env e2 t topFrag --TODO where do we speicify direction of subtyping?
             return $ c1 /\ c2
 
-      MultiIf branches ->  and <$> mapM constrain' branches
+      MultiIf branches ->  and <$> mapM constrain' branches 
           where
               --Ensure each branch has the same type as the overall expr
              --TODO ensure True is in a guard?
-             constrain' (b,e) = (constrain env e tipe)
+             constrain' (b,e) = (constrain env e tipe  topFrag)
                   
                   
       --TODO how does data flow from Exp to Sub-exp when matched ?
@@ -155,7 +157,7 @@ constrain env (A region expr) tipe = trace (" Constrain " ++ (show $ pretty expr
           exists $ \texp ->
           exists $ \tReturn -> do
             --t is the type of the expression we match against 
-            ce <- constrain env ex texp
+            ce <- constrain env ex texp topFrag
             canMatchConstr <-
                 Pattern.allMatchConstraints env texp region (map fst branches)
             canMatchType <- Pattern.typeForPatList env region (map fst branches)
@@ -165,16 +167,18 @@ constrain env (A region expr) tipe = trace (" Constrain " ++ (show $ pretty expr
                     patType <- newVar
                     --let recType = _
                     fragment <- try region $ Pattern.constrain  env p patType --texp
-                    letConstr <- clet [toScheme fragment] <$> constrain env e retAnnot
+                    letConstr <- clet [toScheme fragment] <$>
+                      constrain env e retAnnot (joinFragments [topFrag, fragment])
                     --localRetConstr <- ifValidElse (retAnnot === tipe /\ letConstr) isTopConstr
-                    return $ (letConstr, retAnnot === tipe /\ letConstr)
+                    return $ (letConstr, {-retAnnot === tipe-} isTopConstr/\ letConstr)
             branchPairs <- mapM branchConstraints branches
             let branchConstr = and $ map fst branchPairs
             let maybeResultConstr = and $ map snd branchPairs
 
             let forSureConstr = ce /\ canMatchConstr /\ branchConstr
-            
-            resultConstr <- ifValidElse (maybeResultConstr /\ forSureConstr) (forSureConstr /\ isTopConstr)
+            let tenv = Map.union (Env.types env) $ typeEnv topFrag
+            --resultConstr <- ifValidElse tenv (maybeResultConstr /\ forSureConstr) (forSureConstr /\ isTopConstr)
+            let resultConstr = (maybeResultConstr /\ forSureConstr)
             
             --We can get infinite types if we try to combine our branches
             --So we always assume we return top
@@ -192,17 +196,17 @@ constrain env (A region expr) tipe = trace (" Constrain " ++ (show $ pretty expr
         --      else ("Main." ++ rawName )  --TODO what if not in main?
         exists $ \ctorType -> do
           let ctorExp = (A region $ Data rawName [])
-          ctorConstrs <- constrain env ctorExp ctorType
-          fnConstrs <- constrain env (foldApp ctorExp args) tipe
+          ctorConstrs <- constrain env ctorExp ctorType  topFrag
+          fnConstrs <- constrain env (foldApp ctorExp args) tipe topFrag
           return $ ctorConstrs /\ fnConstrs
         where
           foldApp fn [] = fn
           foldApp fn (arg:argRest) = foldApp (A region $ App fn arg) argRest
 
       Let defs body -> --TODO ensure less than pattern type
-          do c <- constrain env body tipe
+          do c <- constrain env body tipe topFrag
              (schemes, rqs, fqs, header, c2, c1) <-
-                 Monad.foldM (constrainDef region env)
+                 Monad.foldM (constrainDef region env topFrag)
                              ([], [], [], Map.empty, true, true)
                              (concatMap expandPattern defs)
              return $ clet schemes
@@ -223,7 +227,7 @@ constrain env (A region expr) tipe = trace (" Constrain " ++ (show $ pretty expr
 
       PortOut _ _ signal -> return true -- "TODO implement"
 
-constrainDef region env info (Canonical.Definition pattern expr maybeTipe) =
+constrainDef region env topFrag info (Canonical.Definition pattern expr maybeTipe) =
     let qs = [] -- should come from the def, but I'm not sure what would live there...
         (schemes, rigidQuantifiers, flexibleQuantifiers, headers, c2, c1) = info
     in
@@ -235,7 +239,7 @@ constrainDef region env info (Canonical.Definition pattern expr maybeTipe) =
              let tipe = varN v
                  inserts = zipWith (\arg typ -> Map.insert arg (varN typ)) qs rigidVars
                  env' = env { Env.value = List.foldl' (\x f -> f x) (Env.value env) inserts }
-             c <- constrain env' expr tipe
+             c <- constrain env' expr tipe (topFrag {typeEnv = Map.insert name tipe $ typeEnv topFrag})
              return ( schemes
                     , rigidVars ++ rigidQuantifiers
                     , v : flexibleQuantifiers

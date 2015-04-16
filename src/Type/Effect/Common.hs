@@ -21,6 +21,7 @@ import qualified Data.List as List
 import qualified Data.UnionFind.IO as UF
 
 import qualified Type.PrettyPrint as TP
+import qualified Type.State as TS
 
 import Debug.Trace (trace, traceStack)
 --trace _ x = x
@@ -57,20 +58,27 @@ occursCheck t1 t2 = do
   good2 <- oneSideOccurs t2 t1
   return $ good1 && good2
 
-
-getVarUnifs :: Environment -> TypeConstraint -> [(Variable, Variable)]
-getVarUnifs env (A.A _ constr) = case constr of
-  (CEqual (VarN _ v1) (VarN _ v2)) -> [(v1, v2)]
+getVarUnifs :: Map.Map String Type -> TypeConstraint -> [(Variable, Variable)]
+getVarUnifs env (A.A reg constr) = case constr of
+  (CEqual t1@(VarN _ v1) t2@(VarN _ v2)) -> trace ("Var Pair Unif " ++ showType t1 ++ " UU " ++ showType t2) $ [(v1, v2)]
+  (CEqual (TermN _ (Record1 fields1 rest1)) (TermN _ (Record1 fields2 rest2))) ->
+    let
+      commonFields = [f | f <- Map.keys fields1, Map.member f fields2]
+      commonPairs = map (\f -> getVarUnifs env $ A.A reg $ CEqual (head $ fields1 Map.! f) (head $ fields2 Map.! f) ) commonFields
+    in concat commonPairs --TODO unify rest?
   (CAnd l) -> concatMap (getVarUnifs env) l
-  (CLet c1 c2) -> (concatMap (getVarUnifs env) $ map constraint c1 ) ++ (getVarUnifs env) c2
-  CInstance c1 s -> []
+  (CLet c1 c2) -> (concatMap (getVarUnifs env) $ map constraint c1 ) ++ (trace ("SECOND CLET " ++ showConstr c2) $ getVarUnifs env c2)
+  CInstance nm ty -> trace ("INIT INST " ++ nm ++ " TY " ++ showType ty)$ case Map.lookup nm env of
+    Just otherTy -> trace ("INST Unif " ++ nm ++ " " ++ showType ty ++ " UU " ++ showType otherTy) $  getVarUnifs env $ A.A reg $ CEqual ty otherTy
+    _ -> []
   _ -> []
 
 --Simplified version of unification
-constraintOccursCheck :: Environment -> TypeConstraint -> IO Bool
-constraintOccursCheck env annCon@(A.A _ constr) = do
+constraintOccursCheck :: Map.Map String Type -> TypeConstraint -> IO Bool
+constraintOccursCheck env annCon@(A.A reg constr) = do
   let unifPairs = getVarUnifs env annCon
-  trace ("NUM var unifs: " ++ show (length unifPairs)) $ mapM_ (uncurry UF.union) unifPairs
+  putStrLn ("NUM var unifs: " ++ show (length unifPairs))
+  mapM_ (uncurry UF.union) unifPairs
   case constr of
     CTrue -> return True
     CSaveEnv -> return True
@@ -78,10 +86,14 @@ constraintOccursCheck env annCon@(A.A _ constr) = do
       occursCheck t1 t2
     (CAnd cList) -> List.and `fmap` mapM (constraintOccursCheck env) cList
     (CLet c1 c2) -> do
+      let hdrs = concatMap (Map.toList . header) c1
+      mapM (\(nm, ty) -> putStrLn ("DICT " ++ show nm ++ " " ++ showType ty)) hdrs
       good1 <- constraintOccursCheck env c2
       good2 <- List.and `fmap` mapM (constraintOccursCheck env) (map constraint c1 )
       return $ good1 && good2
-    (CInstance c1 c2) -> return True
+    (CInstance nm ty) -> case Map.lookup nm env of
+      Just otherTy -> trace ("LOOKUP success" ++ show nm ++ "TY: " ++ show (TP.pretty TP.Never otherTy) ) $ occursCheck ty otherTy
+      _ -> trace ("LOOKUP FAIL" ++ show nm ) $ return True
   
 
 oneSideOccurs t1 t2 = trace ("Comparing " ++ show (TP.pretty TP.Never t1) ++ " and " ++ show (TP.pretty TP.Never t2) ) $
