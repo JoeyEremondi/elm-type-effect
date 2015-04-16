@@ -27,9 +27,9 @@ import Data.Char (isUpper)
 
 import Type.Effect.Common
 
-import Debug.Trace (trace)
+--import Debug.Trace (trace)
 
---trace _ x = x
+trace _ x = x
 t1 =-> t2 = closedAnnot [("_Lambda", [t1, t2])]
 
 constrain
@@ -107,7 +107,7 @@ constrain env (A region expr) tipe = trace (" Constrain " ++ (show $ pretty expr
             --TODO constrain arg types
             c2 <- constrain env e tbody
             --Make sure the argument type is only the patterns matched
-            cMatch <- Pattern.allMatchConstraints targ region [p]
+            cMatch <- Pattern.allMatchConstraints env targ region [p]
             --TODO adjust this for annotations
             c <- return $ ex (vars fragment) (clet [monoscheme (typeEnv fragment)]
                                              ( c2 ))
@@ -134,17 +134,20 @@ constrain env (A region expr) tipe = trace (" Constrain " ++ (show $ pretty expr
             --t is the type of the expression we match against 
             ce <- constrain env ex texp
             canMatchConstr <-
-                Pattern.allMatchConstraints texp region (map fst branches)
-            canMatchType <- Pattern.typeForPatList region (map fst branches)
+                Pattern.allMatchConstraints env texp region (map fst branches)
+            canMatchType <- Pattern.typeForPatList env region (map fst branches)
             let branchConstraints (p,e) =
                   exists $ \retAnnot -> 
                   exists $ \patType -> do
                     --let recType = _
                     fragment <- try region $ Pattern.constrain  env p patType --texp
                     letConstr <- clet [toScheme fragment] <$> constrain env e retAnnot 
-                    return $ letConstr  /\ retAnnot === tipe
+                    return $ letConstr -- /\ retAnnot === tipe
             resultConstr <- and . (:) ce <$> mapM branchConstraints branches
-            return $ canMatchConstr /\ resultConstr
+            --We can get infinite types if we try to combine our branches
+            --So we always assume we return top
+            --TODO better solution?
+            return $ canMatchConstr /\ resultConstr /\ (tipe === top) --TODO more precise?
 
 
       Data rawName [] -> trace ("DATA single " ++ rawName) $ constrainCtor region env rawName tipe

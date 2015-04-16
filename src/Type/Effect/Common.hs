@@ -19,8 +19,8 @@ import qualified Type.Constrain.Literal as Literal
 
 import qualified Type.PrettyPrint as TP
 
---import Debug.Trace (trace, traceStack)
-trace _ x = x
+import Debug.Trace (trace, traceStack)
+--trace _ x = x
 
 emptyRec = termN EmptyRecord1
 
@@ -32,7 +32,7 @@ subExprType subAnns = mkClosedRecord $ zipWith (\(i::Int) t -> ("_sub" ++ show i
 showField (nm, args) = nm ++ " : " ++ (show $ map (TP.pretty TP.App) args)
 
 mkAnnot :: [(String, [Type] )] -> Type -> Type
-mkAnnot fields restOfRecord = trace ("Making record " ++ show (map showField fields )  ) $
+mkAnnot fields restOfRecord = traceStack ("Making record " ++ show (map showField fields )  ) $
   let
     recDict = Map.fromList $ map (\(nm,args) -> (nm, [subExprType args]) ) fields
   in record recDict restOfRecord

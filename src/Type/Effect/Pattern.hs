@@ -21,8 +21,8 @@ import qualified Data.List as List
 
 import qualified Type.PrettyPrint as TP
 
---import Debug.Trace (trace)
-trace _ x = x
+import Debug.Trace (trace)
+--trace _ x = x
 
 constrain :: Environment -> P.CanonicalPattern -> Type
           -> ErrorT (A.Region -> PP.Doc) IO Fragment
@@ -83,13 +83,15 @@ constrain env pattern tipe =
           (kind, cvars, args, result) <- liftIO $ freshDataScheme env (V.toString name)
           argTypes <- mapM (\_ -> newVar) args
           fragment <- Monad.liftM joinFragments (Monad.zipWithM (constrain env) patterns argTypes)
-          let
-              
+          return fragment --TODO right?
+          --We don't constrain at all here, since we already did the pattern match check
+          --TODO let-expression for special cases?
+          {-    
           recordStructureConstr <-
             exists $ \recordSubType ->
             exists $ \restOfRec -> do
              let ctorFieldConstr =
-                   trace "mkAnnot2" $ tipe === directRecord [("_" ++ V.toString name, recordSubType )] restOfRec
+                   tipe === directRecord [("_" ++ V.toString name, recordSubType )] restOfRec
              
              argTypesFrag <- genSubTypeConstr recordSubType patterns 1 emptyFragment
              let argTypesConstr = typeConstraint argTypesFrag
@@ -101,7 +103,7 @@ constrain env pattern tipe =
                 typeConstraint = typeConstraint fragment /\ recordStructureConstr,
                 vars = cvars ++ vars fragment
               }
-
+          -}
       P.Record fields -> do
           pairs <- liftIO $ mapM (\name -> (,) name <$> variable Flexible) fields
           let tenv = Map.fromList (map (second varN) pairs)
@@ -198,17 +200,84 @@ containsWildcard pat =
 --Merge them into a single constructor string, and a list of sub-patterns matched
 --pats should never be empty
 
-allMatchConstraints argType region patList = do
-  typeCanMatch <- typeForPatList region patList
+allMatchConstraints env argType region patList = do
+  typeCanMatch <- typeForPatList env region patList
   return $ trace ("!!! Pattern match type : " ++ show (TP.pretty TP.App typeCanMatch) ) $ (argType === typeCanMatch)
     where t1 === t2 = A.A region (CEqual t1 t2)
 
 
+fieldSubset :: (Map.Map String [Type]) -> (Map.Map String [Type]) -> Bool
+fieldSubset f1 f2 =
+  let
+    names1 = Map.keys f1
+    f2Values = map (\n -> (n, Map.lookup n f2)) names1
+    valueGood v = case v of
+      (_, Nothing) -> False
+      (n, Just t2) ->
+        let
+          t1 = case Map.lookup n f1 of
+            Nothing -> error $ "Key " ++ show n ++ " not in map " ++ show (Map.keys f1)
+            Just x -> x
+          pairWise = List.all (uncurry typeNEqual) $ zip t1 t2
+        in (length t1 == length t2) && pairWise
+  in List.all valueGood f2Values
+
+type1Equal :: Term1 Type -> Term1 Type -> Bool
+type1Equal t1 t2 = case (t1, t2) of
+  (App1 t1a t1b, App1 t2a t2b) -> (typeNEqual t1a t2a) && (typeNEqual t1b t2b)
+  (Fun1 t1a t1b, App1 t2a t2b) -> (typeNEqual t1a t2a) && (typeNEqual t1b t2b)
+  (Var1 _, Var1 _) -> True
+  (EmptyRecord1, EmptyRecord1) -> True
+  (Record1 fields1 t1b, Record1 fields2 t2b) ->
+    (fieldSubset fields1 fields2) && (fieldSubset fields2 fields1) && (typeNEqual t1b t2b)
+  _ -> False
+
+--Check if two types are literally identical
+typeNEqual :: Type -> Type -> Bool
+typeNEqual t1 t2 = case (t1, t2) of
+  (VarN v1 t1, VarN v2 t2) -> (v1 == v2) && (t1 == t2) 
+  (TermN v1 t1, TermN v2 t2) -> (v1 == v2) && (type1Equal t1 t2)
+  _ -> False
+
+--toMain s = if (elem '.' s) then s else ("Main." ++ s)
+
+checkIfTotal
+  :: Environment
+  -> [P.CanonicalPattern]
+  -> ErrorT [PP.Doc] IO Bool
+checkIfTotal env [] = error "ERROR: can't have Case expression with no patterns"
+checkIfTotal env patList = do
+  let hasWildcard = (any containsWildcard patList)
+  let sortedPats = sortByCtor patList
+  let mapGet d k = case Map.lookup k d of
+        Nothing -> error $ "Key " ++ show k ++ " not in " ++ show (Map.keys d)
+        Just x -> x
+  case hasWildcard of
+    True -> return True
+    False -> do
+      let allCtors = constructor env
+      let ctorNames = Map.keys allCtors
+      ctorValues <- mapM liftIO $ Map.elems allCtors
+      ourTypeInfo <- trace ("Ctor names " ++ show ctorNames ++ "\nmap Keys " ++ show (Map.keys allCtors) ) $ liftIO $ mapGet allCtors (tail $ fst $ head sortedPats) --remove underscore
+      let (_,_,_,ourType) = ourTypeInfo
+      let ctorsForOurType =
+            map fst $ filter (\(nm, (_,_,_,tp)) -> typeNEqual tp ourType) $ zip ctorNames ctorValues
+      
+      let
+        --ctorCovered :: Map.Map String [P.CanonicalPattern] -> String -> Bool
+        ctorCovered dict ctor  =
+            case (Map.lookup ("_" ++ ctor) dict) of
+              Nothing -> return False
+              Just subPats -> List.and `fmap` mapM (checkIfTotal env) subPats
+      coveredList <- mapM (ctorCovered $ Map.fromList sortedPats) ctorsForOurType
+      return $ List.and coveredList
+
 typeForPatList
-  :: A.Region -> [P.CanonicalPattern]
+  :: Environment -> A.Region -> [P.CanonicalPattern]
     -> ErrorT [PP.Doc] IO Type
-typeForPatList region patList =
-  if any containsWildcard patList
+typeForPatList env region patList = do
+  isTotal <- checkIfTotal env patList
+  if isTotal
      then trace "WILDCARD FOUND" $ anyVar
      else eachCtorHelper (sortByCtor patList)  
   where
@@ -220,7 +289,7 @@ typeForPatList region patList =
     eachCtorHelper []  = return emptyRec
     eachCtorHelper ( (ctor, subPats ) : otherPats) =
       do
-        subTypes <- mapM (typeForPatList region) subPats
+        subTypes <- mapM (typeForPatList env region) subPats
         otherFields <- eachCtorHelper otherPats
         let ourRec = (trace "mkAnnot1" $ mkAnnot [(ctor, subTypes)] otherFields )
         return ourRec -- $ subConsts /\ otherFieldConstr /\ ourRecConstr

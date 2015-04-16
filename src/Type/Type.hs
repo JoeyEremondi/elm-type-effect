@@ -93,6 +93,7 @@ showType t = case t of
 showVar t = show $ pretty App t
 
 showConstr :: TypeConstraint -> String
+
 showConstr (A _ con) = case con of
   CTrue -> ""
   CSaveEnv -> "SAVE_ENV"
@@ -100,6 +101,7 @@ showConstr (A _ con) = case con of
   (CAnd conList) -> "\n****" ++ (List.intercalate "\n" $ map showConstr conList)
   (CLet vars c2) -> "Let " ++ (List.intercalate "\n" $ map showVar vars) ++ showConstr c2
   (CInstance c1 c2) -> "INST"
+
 
 infixl 8 /\
 

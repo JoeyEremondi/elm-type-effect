@@ -44,7 +44,7 @@ infer interfaces modul =
         
         
         () <- case TS.sHint state of
-                hints@(_:_) -> throwError hints
+                hints@(_:_) -> trace "Making Type error" $ throwError hints
                 []          -> return ()
 
         () <- Check.portTypes (program (body modul))
@@ -97,19 +97,23 @@ genTotalityConstraints interfaces modul =
 
       let env = normalEnv {Env.types = Map.fromList $ zip tyNames newTypes }
 
-      ctors <- forM (Map.keys (Env.constructor env)) $ \name -> do
+      fvar <- liftIO $ T.variable T.Flexible
+      c <- trace "Going into EfExpr" $ EfExpr.constrain env (program (body modul)) (T.varN fvar)
+      
+      ctors <- trace "Done EfExpr?" $ forM (Map.keys (Env.constructor env)) $ \name -> do
                  (_, vars, args, result) <- liftIO $ Env.freshDataScheme env name
                  return (name, (vars, foldr (T.==>) result args))
 
       importedVars <-  mapM (canonicalizeAnnots env) (Map.toList interfaces)
+
+      
 
       let allTypes = concat (ctors : importedVars)
           vars = concatMap (fst . snd) allTypes
           header = Map.map snd (Map.fromList allTypes)
           environ = A.noneNoDocs . T.CLet [ T.Scheme vars [] (A.noneNoDocs T.CTrue) header ]
 
-      fvar <- liftIO $ T.variable T.Flexible
-      c <- EfExpr.constrain env (program (body modul)) (T.varN fvar)
+      
       return (header, environ c)
 
 --genConstraints
