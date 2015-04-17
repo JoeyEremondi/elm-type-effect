@@ -24,6 +24,10 @@ import qualified Type.PrettyPrint as TP
 import Debug.Trace (trace)
 --trace _ x = x
 
+--Find the annotations that a variable matching a pattern must have
+--And return those constraints, along with the "fragment"
+--In the Elm type system, fragments contain new variables defined
+--By patterns, as well as constraints on them
 constrain :: Environment -> P.CanonicalPattern -> Type
           -> ErrorT (A.Region -> PP.Doc) IO Fragment
 constrain env pattern tipe = 
@@ -31,6 +35,7 @@ constrain env pattern tipe =
         newVar = varN `fmap` (liftIO $ variable Flexible)
         t1 === t2 = A.A region (CEqual t1 t2)
         --genSubTypeConstr :: Type -> [P.CanonicalPattern] -> Int -> TypeConstraint -> TypeConstraint
+        
         genSubTypeConstr ty patList num frag = do
           let thePatList :: [P.CanonicalPattern]
               thePatList = patList
@@ -50,15 +55,18 @@ constrain env pattern tipe =
                         let ourFieldConstr = ty === (directRecord [("_sub" ++ show n, fieldAnnot)] restOfRec)
                         return $ constr /\ ourFieldConstr
                   let newFrag = joinFragments [frag, ourFieldFrag {typeConstraint = newConstr}]
-                  genSubTypeConstr ty rest (n+1) newFrag
+                  genSubTypeConstr ty rest (n+1) newFrag 
     in
     case pattern of
+      --No constraints when we match anything, no variables either
       P.Anything -> return emptyFragment
 
+      --We know the exact value of a literal
       P.Literal lit -> do
           c <- liftIO $ Literal.constrain env region lit tipe
           return $ emptyFragment { typeConstraint = c }
 
+      --Variable: could have any annotations, so use a fresh typeVar
       P.Var name -> do
           v <- liftIO $ variable Flexible
           return $ Fragment {
@@ -67,6 +75,8 @@ constrain env pattern tipe =
               typeConstraint = varN v === tipe
           }
 
+      --Alias: just add the name of the pattern to a fragment, then constrain the pattern
+      --This is used for things like sort ((x,y) as pair) = if x < y then pair else (y,x)
       P.Alias name p -> do
           v <- liftIO $ variable Flexible
           let varType = varN v
@@ -78,15 +88,17 @@ constrain env pattern tipe =
             , typeConstraint = varType === tipe /\ typeConstraint fragment
             }
 
+      --Data: go into sub-patterns to extract their fragments
+      --Our pattern-match checks in Expression.hs already constrain the possible constructors
       P.Data name patterns -> do
           --TODO is this the right args?
           (kind, cvars, args, result) <- liftIO $ freshDataScheme env (V.toString name)
           argTypes <- mapM (\_ -> newVar) args
           fragment <- Monad.liftM joinFragments (Monad.zipWithM (constrain env) patterns argTypes)
-          return fragment --TODO right?
+          --return fragment --TODO right?
           --We don't constrain at all here, since we already did the pattern match check
           --TODO let-expression for special cases?
-          {-    
+              
           recordStructureConstr <-
             exists $ \recordSubType ->
             exists $ \restOfRec -> do
@@ -103,7 +115,7 @@ constrain env pattern tipe =
                 typeConstraint = typeConstraint fragment /\ recordStructureConstr,
                 vars = cvars ++ vars fragment
               }
-          -}
+          
       P.Record fields -> do
           pairs <- liftIO $ mapM (\name -> (,) name <$> variable Flexible) fields
           let tenv = Map.fromList (map (second varN) pairs)
