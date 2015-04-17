@@ -74,34 +74,37 @@ constrain env (A region expr) tipe = trace (" Constrain " ++ (show $ pretty expr
         (Boolean b) -> exists $ \restOfRec ->
           return $ tipe === mkAnnot [("_" ++ show b, [])] restOfRec
 
-      GLShader _uid _src gltipe -> return true -- "TODO implement"
+      GLShader _uid _src gltipe -> return true --We never pattern match against GLSL shaders
 
 
       --Native can be any function, but we always make it a function
       --Meaning for non-function values, we MUST match against it with _
       --This deals with the fact that there are infinite integer constructors
       Var (V.Canonical (V.Module ("Native":_)) _) -> return true --isTop tipe
-      --Special case: Native is a Rigid type variable, could be anything
-      {-
-      Var (V.Canonical (V.Module ("Native":_)) _) -> do
-        exists $ \restOfRec -> do
-          rigidType <- varN `fmap` (liftIO $ variable Rigid)
-          return true --(tipe === rigidType) --TODO constrain native?
-        -}
 
-      --TODO need special case here?
-      --TODO native?
+
+      --Variable has annotation that we look up in the environment
       Var var
           | name == saveEnvName -> return (A region CSaveEnv)
           | otherwise           -> return (name <? tipe)
           where
             name = V.toString var
 
-      Range lo hi -> return true -- "TODO implement"
+      --A range could be empty, so we set its annotation to top
+      Range lo hi ->
+        exists $ \tlo ->
+        exists $ \thi -> do
+          c1 <- constrain env lo tlo
+          c2 <- constrain env hi thi
+          isTopConstr <- isTop tipe
+          return $ c1 /\ c2 /\ isTopConstr
 
+      --We know that [] is never a cons
       ExplicitList [] -> exists $ \restOfRec ->
         return $ tipe === mkAnnot [("_[]", [])] restOfRec
-      
+
+     --We know that an explicit list that's not empty will start with a cons
+      --Then we recursively annotate the rest of the list
       ExplicitList (firstExp:others) ->
         exists $ \restOfRec ->
         exists $ \exprType ->
@@ -112,15 +115,17 @@ constrain env (A region expr) tipe = trace (" Constrain " ++ (show $ pretty expr
           return $ exprConstr /\ subListConstr /\ isConsConstr
       
       --Treat binops just like functions at the type level
-      --TODO is this okay?
       Binop op e1 e2 -> trace ("BINOP " ++ show e1 ++ "\n" ++ show e2) $ do
         let opFn = A region $ Var op
         let fn1 = A region $ App opFn e1
         let fnVersion = A region $ App fn1 e2
         constrain env fnVersion tipe
 
-      --Nothing fancy goes on here, we just get the annotation for the pattern
-      --And the possible constructors for the result, and bind them into a function type
+      --Lambda: we extract the fragment (i.e. variables) from the pattern argument
+      --Infer the constraints for the body, given arguments are bound in a scheme
+      --Then ensure that the function has annotation {_Lambda  : {_sub1:t1, _sub2:t2 }  }
+      --where t1 is the set of valid constructors we can match against for our argument
+      --and t2 is the set of constructor values possibly returned by the function
       Lambda p e ->
           exists $ \targ ->
           exists $ \tbody -> do
@@ -136,7 +141,9 @@ constrain env (A region expr) tipe = trace (" Constrain " ++ (show $ pretty expr
             let retConstr =
                   typeConstraint fragment /\ cMatch /\ c /\ tipe === fnTy
             return retConstr
-          
+
+      --Nothing fancy here: we ensure the function has a function annotation
+      --And that the argument annotation is a subtype of the function argument annotation
       App e1 e2 -> 
           exists $ \t -> do
             fnTy <- makeFn t tipe
@@ -144,14 +151,22 @@ constrain env (A region expr) tipe = trace (" Constrain " ++ (show $ pretty expr
             c2 <- constrain env e2 t --TODO where do we speicify direction of subtyping?
             return $ c1 /\ c2
 
-      MultiIf branches ->  and <$> mapM constrain' branches
+      --TODO not top?
+      --We join over multiple branches of an if statement, giving them Top
+      --Since there are many potential values they can take on
+      MultiIf branches ->  isTop tipe --and <$> mapM constrain' branches 
           where
               --Ensure each branch has the same type as the overall expr
              --TODO ensure True is in a guard?
-             constrain' (b,e) = (constrain env e tipe)
+             constrain' (b,e) = (constrain env e tipe )
                   
                   
-      --TODO how does data flow from Exp to Sub-exp when matched ?
+      --TODO not top?
+      --We join over multiple branches of a case statement, giving them Top
+      --Since there are many potential values the overall expression
+      --Additionally, we ensure that the annotation of the expression matched against
+      --Is a subtype of the patterns that can be matched
+      --We also do some manipulation with fragments (variables) bound by pattern matches
       Case ex branches -> trace ("CASE: Type " ++ show (TP.pretty TP.App tipe)) $
           exists $ \texp ->
           exists $ \tReturn -> do
@@ -175,6 +190,10 @@ constrain env (A region expr) tipe = trace (" Constrain " ++ (show $ pretty expr
             return $ canMatchConstr /\ resultConstr /\ isTopConstr --TODO more precise?
 
 
+      --A Constructor has a function type, accepting any argument
+      --And returning something tagged with (at least) its constructor
+      --We also constrain that there exists some (possibly empty) set of other constructors it can take
+      --This allows for sub-effecting
       Data rawName [] -> trace ("DATA single " ++ rawName) $ constrainCtor region env rawName tipe
 
       --We treat constructor application with args as a function call
@@ -192,6 +211,9 @@ constrain env (A region expr) tipe = trace (" Constrain " ++ (show $ pretty expr
           foldApp fn [] = fn
           foldApp fn (arg:argRest) = foldApp (A region $ App fn arg) argRest
 
+      --Let expressions: we iterate through the definitions of the let expression
+      --Getting the schemes for each (mutually recursive) definition
+      --We constrain the body given the defintions of the let variable
       Let defs body -> --TODO ensure less than pattern type
           do c <- constrain env body tipe
              (schemes, rqs, fqs, header, c2, c1) <-
@@ -202,19 +224,61 @@ constrain env (A region expr) tipe = trace (" Constrain " ++ (show $ pretty expr
                            (clet [Scheme rqs fqs (clet [monoscheme header] c2) header ]
                                  (c1 /\ c))
 
-      Access e label -> return true -- "TODO implement"
+      --Since our annotations work on records to begin with, we just do record manipulations
+      --Like we would for normal typechecking
+      --This is safe, since our annotations use string names that are not syntactically valid in Elm
+      --So there will never be name conflicts
+      Access e label -> 
+        exists $ \recordType ->
+        exists $ \restOfRecord -> do
+          recordConstr <- constrain env e recordType 
+          return $ recordConstr /\ (recordType === (directRecord [(label, tipe)] restOfRecord))
           
-      Remove e label -> return true -- "TODO implement"
+      Remove e label ->
+        exists $ \originalRecType ->
+        exists $ \fieldType -> do
+          recordConstr <- constrain env e originalRecType 
+          return $ recordConstr /\ (originalRecType === (directRecord [(label, fieldType)] tipe))
+        
           
-      Insert e label value -> return true -- "TODO implement"
+      Insert e label value ->
+        exists $ \originalRecType ->
+        exists $ \newFieldType -> do
+          recordConstr <- constrain env e originalRecType 
+          return $ recordConstr /\  (tipe === (directRecord [(label, newFieldType)] originalRecType))
 
-      Modify e fields -> return true -- "TODO implement"
+      Modify e fields ->
+        exists $ \originalRecType ->
+        exists $ \newFieldType ->
+        exists $ \restOfRec -> do
+          recordConstr <- constrain env e originalRecType 
+          fieldNewTypeConstrs <- forM fields $ \(nm, fexp) -> do
+            newFieldType <- newVar
+            fieldConstr <- constrain env fexp newFieldType 
+            return (nm, newFieldType, fieldConstr)
+          let fieldTypeConstr = foldr  (\(_,_,c1) c2 -> c1 /\ c2) true fieldNewTypeConstrs
+          let fieldTypePairs = map (\(n,t,_) -> (n,t))  fieldNewTypeConstrs
+            
+          return $
+            recordConstr
+            /\ fieldTypeConstr
+            /\(tipe === (directRecord fieldTypePairs restOfRec))
           
-      Record fields -> return true -- "TODO implement"
-
-      PortIn _ _ -> return true -- "TODO implement"
-
-      PortOut _ _ signal -> return true -- "TODO implement"
+      --Recursive: a record with no fields is empty
+      --And for a record with fields, we infer the annotation for its field
+      --Recursively infer the annotations for the rest of the record
+      --And constrain that the result record must have the one field and the rest of the record
+      Record fields -> case fields of
+        [] -> return $  tipe === emptyRec
+        ((nm,fexp):others) ->
+          exists $ \restOfRec ->
+          exists $ \fieldType -> do
+            fieldConstr <- constrain env fexp fieldType 
+            otherConstr <- constrain env (A region $ Record others) restOfRec 
+            return $
+              fieldConstr
+              /\ otherConstr
+              /\ tipe === directRecord [(nm, fieldType)] restOfRec
 
 constrainDef region env info (Canonical.Definition pattern expr maybeTipe) =
     let qs = [] -- should come from the def, but I'm not sure what would live there...
