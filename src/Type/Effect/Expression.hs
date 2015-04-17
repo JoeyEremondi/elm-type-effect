@@ -29,6 +29,17 @@ import Type.Effect.Common
 
 --import Debug.Trace (trace)
 
+nativeOps = map (\n -> V.Canonical (V.Module ["Basics"]) n ) [
+  "+"
+  ,"-"
+  ,"*"
+  ,"/"
+  ,"%"
+  ,"-"
+  ,"//"
+  ,"*"
+  ]
+
 trace _ x = x
 
 newVar = varN `fmap` (liftIO $ variable Flexible)
@@ -115,11 +126,20 @@ constrain env (A region expr) tipe = trace (" Constrain " ++ (show $ pretty expr
           return $ exprConstr /\ subListConstr /\ isConsConstr
       
       --Treat binops just like functions at the type level
-      Binop op e1 e2 -> trace ("BINOP " ++ show e1 ++ "\n" ++ show e2) $ do
-        let opFn = A region $ Var op
-        let fn1 = A region $ App opFn e1
-        let fnVersion = A region $ App fn1 e2
-        constrain env fnVersion tipe
+      Binop op e1 e2 ->
+        if (elem op nativeOps)
+        then
+          exists $ \t1 ->
+          exists $ \t2 -> do
+            c1 <- constrain env e1 t1
+            c2 <- constrain env e2 t2
+            tc <- isTop tipe
+            return $ c1 /\ c2 /\ tc
+        else do
+            let opFn = A region $ Var op
+            let fn1 = A region $ App opFn e1
+            let fnVersion = A region $ App fn1 e2
+            constrain env fnVersion tipe
 
       --Lambda: we extract the fragment (i.e. variables) from the pattern argument
       --Infer the constraints for the body, given arguments are bound in a scheme

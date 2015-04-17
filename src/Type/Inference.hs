@@ -23,6 +23,7 @@ import Control.Arrow (first, second)
 import Control.Monad.State (execStateT, forM)
 import Control.Monad.Error (ErrorT, runErrorT, liftIO, throwError)
 import qualified Type.PrettyPrint as TP
+import qualified AST.PrettyPrint as AP
 import qualified Type.Fragment as Fragment
 
 import System.IO.Unsafe  -- Possible to switch over to the ST monad instead of
@@ -59,7 +60,12 @@ infer interfaces modul =
         --let annots = Map.empty :: Map.Map String CanonicalType
 
         typeResult <-  Check.mainType types
-        return $ trace ("Annotations: " ++ show annots ) (typeResult, annots)
+        liftIO $ putStrLn "Type Annotations:"
+        liftIO $ forM (Map.toList annots) $ \(val, tip) -> do
+          putStrLn $ val ++ " :: " ++ render (AP.pretty tip)
+          return ()
+        
+        return (typeResult, annots)
 
 
 

@@ -36,11 +36,10 @@ map f l = case l of
   [] -> []
   (x::xs) -> (f x) :: (map f xs )
 
---This should succeed. I'm surprised it doesn't get poisoned
-mappedHead = head <| map (\x -> x * x) [1,2,3] 
+--This could succeed, but gets poisoned, since map is based on Case
+poisonMappedHead = head <| map (\x -> x * x) [1,2,3] 
 
 --This should fail
---TODO why doesn't this fail?
 badMappedHead = head <| map (\x -> x * x) []
 
 
@@ -50,7 +49,7 @@ finiteIntFn x = case x of
   2 -> True
   90 -> False
 
---Should fail, but doesn't because of poisoning --TODO
+--Should fail
 badInt1 = finiteIntFn (3 + 4)
 
 --Should fail
@@ -58,6 +57,7 @@ badInt2 = finiteIntFn (7)
 
 goodInt1 = finiteIntFn (2)
 
+--Fails because of poisoning, we don't do constant propogation
 poisonInt1 = finiteIntFn (1+1)
 
 infIntFn x = case x of
@@ -72,12 +72,12 @@ goodInt4 = infIntFn 2
 
 --Comparisons: LT, EQ, GR
 --Shows that the different branches are unified
---But poisoned to Top --TODO
+--But poisoned to Top
 reverseComparison comp = case comp of
   LT -> GT
   GT -> LT
 
---This should succeed --TODO why doesn't it?
+--This should succeed: because we cover all cases, it can match against top
 goodJoin1 comp = case (reverseComparison LT) of
   LT -> 3
   GT -> -3
