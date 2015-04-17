@@ -28,8 +28,8 @@ import qualified Type.Fragment as Fragment
 import System.IO.Unsafe  -- Possible to switch over to the ST monad instead of
                          -- the IO monad. I don't think that'd be worthwhile.
 
-import Debug.Trace (trace)
---trace _ x = x
+--import Debug.Trace (trace)
+trace _ x = x
 
 infer
   :: Interfaces
@@ -71,7 +71,7 @@ checkTotality interfaces modul =
         state <- trace ("Got constraints " ++ T.showConstr constraint)
                 $ liftIO $ execStateT (Solve.solve constraint) TS.initialState
         case TS.sHint state of
-                hints@(_:_) -> throwError hints
+                hints@(_:_) -> liftIO $ mapM_ (\p -> putStrLn ("WARNING: " ++ render p)) hints
                 []          -> return ()
         let header' = Map.delete "::" header
             types = Map.difference (TS.sSavedEnv state) header'
@@ -85,14 +85,12 @@ genTotalityConstraints
     -> ErrorT [Doc] IO (Env.TypeDict, T.TypeConstraint)
 genTotalityConstraints interfaces modul =
   do
-      --We replace the types constructors take with rigid variables
-      --Since they a constructor can take any value i.e. it doesn't pattern match
+      
       normalEnv <- liftIO $ Env.initialEnvironment (canonicalizeAdts interfaces modul)
       let (tyNames, oldTypes) = unzip $ Map.toList $ Env.types normalEnv
-      --TODO rigid or flex?
       newTypes <- mapM (\_ ->
                         do
-                           newVar <- liftIO $ T.variable T.Flexible
+                           newVar <- liftIO $ T.variable T.Rigid
                            --TODO is this right?
                            return $ T.varN newVar) oldTypes
 

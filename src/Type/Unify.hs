@@ -16,9 +16,9 @@ import Type.Type
 import Type.PrettyPrint
 import qualified Type.Hint as Hint
 import Elm.Utils ((|>))
-import Debug.Trace (trace)
+--import Debug.Trace (trace)
 
---trace _ x = x
+trace _ x = x
 
 
 unify :: A.Region -> Variable -> Variable -> StateT TS.SolverState IO ()

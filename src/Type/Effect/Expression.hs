@@ -34,8 +34,8 @@ trace _ x = x
 newVar = varN `fmap` (liftIO $ variable Flexible)
 
 makeFn t1 t2 = do
-  restOfRec <- newVar
-  return $ mkAnnot [("_Lambda", [t1, t2])] restOfRec
+  topTy <- newVar
+  return $ closedAnnot [("_Lambda", [t1, t2]), ("__Top", [] )] 
 
 constrain
     :: Env.Environment
@@ -80,7 +80,7 @@ constrain env (A region expr) tipe = trace (" Constrain " ++ (show $ pretty expr
       --Native can be any function, but we always make it a function
       --Meaning for non-function values, we MUST match against it with _
       --This deals with the fact that there are infinite integer constructors
-      Var (V.Canonical (V.Module ("Native":_)) _) -> return true --isTop tipe
+      Var (V.Canonical (V.Module ("Native":_)) _) -> isTop tipe
 
 
       --Variable has annotation that we look up in the environment
@@ -154,11 +154,14 @@ constrain env (A region expr) tipe = trace (" Constrain " ++ (show $ pretty expr
       --TODO not top?
       --We join over multiple branches of an if statement, giving them Top
       --Since there are many potential values they can take on
-      MultiIf branches ->  isTop tipe --and <$> mapM constrain' branches 
+      MultiIf branches ->  do
+        branchConstrs <- mapM constrain' branches
+        isTopConstr <- isTop tipe 
+        return $ isTopConstr /\ (and branchConstrs) 
           where
               --Ensure each branch has the same type as the overall expr
              --TODO ensure True is in a guard?
-             constrain' (b,e) = (constrain env e tipe )
+             constrain' (b,e) = exists $ \branchType -> (constrain env e branchType )
                   
                   
       --TODO not top?
@@ -174,7 +177,7 @@ constrain env (A region expr) tipe = trace (" Constrain " ++ (show $ pretty expr
             ce <- constrain env ex texp
             canMatchConstr <-
                 Pattern.allMatchConstraints env texp region (map fst branches)
-            canMatchType <- Pattern.typeForPatList env region (map fst branches)
+            --canMatchType <- Pattern.typeForPatList env region (map fst branches)
             let branchConstraints (p,e) =
                   exists $ \retAnnot -> 
                   exists $ \patType -> do

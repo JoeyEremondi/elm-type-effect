@@ -15,11 +15,14 @@ import AST.PrettyPrint (pretty)
 import Type.Type
 import Type.Fragment
 import Type.Environment as Env
-import qualified Type.Effect.Literal as Literal
+import qualified AST.Literal as Literal
 import Type.Effect.Common
 import qualified Data.List as List
+import qualified Data.UnionFind.IO as UF
 
 import qualified Type.PrettyPrint as TP
+
+import System.IO.Unsafe (unsafePerformIO)
 
 import Debug.Trace (trace)
 --trace _ x = x
@@ -35,7 +38,12 @@ constrain env pattern tipe =
         newVar = varN `fmap` (liftIO $ variable Flexible)
         t1 === t2 = A.A region (CEqual t1 t2)
         --genSubTypeConstr :: Type -> [P.CanonicalPattern] -> Int -> TypeConstraint -> TypeConstraint
-        
+
+        --Helper function: given the sub-patterns of a pattern match
+        --Generate the fragment with constraints for annotating
+        --With their precise values
+        --Nothing fancy, really just looping over the patterns
+        --And joining their fragments, recusively calling constrain on them
         genSubTypeConstr ty patList num frag = do
           let thePatList :: [P.CanonicalPattern]
               thePatList = patList
@@ -63,7 +71,7 @@ constrain env pattern tipe =
 
       --We know the exact value of a literal
       P.Literal lit -> do
-          c <- liftIO $ Literal.constrain env region lit tipe
+          c <- liftIO $ constrainLiteral env region lit tipe
           return $ emptyFragment { typeConstraint = c }
 
       --Variable: could have any annotations, so use a fresh typeVar
@@ -89,7 +97,7 @@ constrain env pattern tipe =
             }
 
       --Data: go into sub-patterns to extract their fragments
-      --Our pattern-match checks in Expression.hs already constrain the possible constructors
+      --And constrain that the final result has the given constructor  
       P.Data name patterns -> do
           --TODO is this the right args?
           (kind, cvars, args, result) <- liftIO $ freshDataScheme env (V.toString name)
@@ -115,7 +123,7 @@ constrain env pattern tipe =
                 typeConstraint = typeConstraint fragment /\ recordStructureConstr,
                 vars = cvars ++ vars fragment
               }
-          
+      --Record : just map each sub-pattern into fields of a record
       P.Record fields -> do
           pairs <- liftIO $ mapM (\name -> (,) name <$> variable Flexible) fields
           let tenv = Map.fromList (map (second varN) pairs)
@@ -132,55 +140,26 @@ instance Error (A.Region -> PP.Doc) where
   strMsg str span =
       PP.vcat [ PP.text $ "Type error " ++ show span
               , PP.text str ]
-{-
-data PatType =
-  PatCtor String
-  | PatRec
-  | PatAnything
-    deriving (Eq, Ord)
--}
-
-{-
-data OneLevelPat =
-  Ctor (String, [P.CanonicalPattern])
-  | WildCard
-  deriving (Eq)
--}
-
-----Used to sort based on constructor
---sameCtor (Ctor _) (Ctor _) = True
---sameCtor WildCard WildCard = True
---sameCtor _ _ = False
 
 
+--Given a pattern, return name of the top constructor in the pattern
 ctorName :: P.CanonicalPattern -> String
 ctorName pat = case pat of
   (P.Data name p2) -> "_" ++ V.toString name
-  (P.Record p) -> error "TODO record case"
+  (P.Record p) -> ""
   (P.Alias p1 p2) -> ctorName p2
   (P.Var p) -> "_"
   P.Anything -> "_"
-  (P.Literal p) -> "_" ++ show p
+  (P.Literal l) -> "_" ++ showLit l
 
+showLit :: Literal.Literal -> String
+showLit lit = case lit of
+  (Literal.IntNum i) -> show i
+  (Literal.FloatNum f) -> show f 
+  (Literal.Chr c) -> show c
+  (Literal.Str s) -> show s
+  (Literal.Boolean b) -> show b
 
---TODO P.record?
-{-
-patternCtor :: P.CanonicalPattern -> OneLevelPat
-patternCtor (P.Data name pats) = Ctor ("_" ++ V.toString name, pats)
-patternCtor (P.Literal lit) = Ctor ("_" ++ show lit, [])
-patternCtor (P.Alias _ pat) = patternCtor pat
-patternCtor P.Anything = WildCard
-patternCtor (P.Var _) = WildCard
--}
-{-
-mergeOneLevel :: OneLevelPat -> OneLevelPat -> OneLevelPat
-mergeOneLevel WildCard _ = WildCard
-mergeOneLevel _ WildCard = WildCard
-mergeOneLevel p1@(Ctor (n1, pl1) ) p2@(Ctor (n2, pl2) ) =
-  if n1 == n2
-  then Ctor (n1, zipWith (\x y -> [x,y]) pl1 pl2 )
-  else error "Can't merge different constructors"
--}
 
 
 --Group patterns by their constructors, since we might match on more/less specific versions
@@ -200,6 +179,8 @@ sortByCtor patList =
       
   in sortedPats
 
+--Check if a pattern can match any expression
+--Basically check for a variable or underscore
 containsWildcard :: P.CanonicalPattern -> Bool
 containsWildcard pat =
   case pat of
@@ -208,10 +189,10 @@ containsWildcard pat =
     P.Anything -> True
     _ -> False
 
---Given the list of patterns with the same initial constructor
---Merge them into a single constructor string, and a list of sub-patterns matched
---pats should never be empty
-
+--Given an environment, a type of a value to be matched
+--Error information, and a list of patterns to match against
+--Return the constraint that every possible constructor the value can take
+--Must be able to be matched by the patterns
 allMatchConstraints env argType region patList = do
   typeCanMatch <- typeForPatList env region patList
   return $ trace ("!!! Pattern match type : " ++ show (TP.pretty TP.App typeCanMatch) ) $ (argType === typeCanMatch)
@@ -234,63 +215,8 @@ fieldSubset f1 f2 =
         in (length t1 == length t2) && pairWise
   in List.all valueGood f2Values
 
-type1Equal :: Term1 Type -> Term1 Type -> Bool
-type1Equal t1 t2 = case (t1, t2) of
-  (App1 t1a t1b, App1 t2a t2b) -> (typeNEqual t1a t2a) && (typeNEqual t1b t2b)
-  (Fun1 t1a t1b, App1 t2a t2b) -> (typeNEqual t1a t2a) && (typeNEqual t1b t2b)
-  (Var1 _, Var1 _) -> True
-  (EmptyRecord1, EmptyRecord1) -> True
-  (Record1 fields1 t1b, Record1 fields2 t2b) ->
-    (fieldSubset fields1 fields2) && (fieldSubset fields2 fields1) && (typeNEqual t1b t2b)
-  _ -> False
-
---Check if two types are literally identical
-typeNEqual :: Type -> Type -> Bool
-typeNEqual t1 t2 = trace ("Comparing " ++ (show $ TP.pretty TP.Never t1  ) ++ " and " ++ ((show $ TP.pretty TP.Never t2  ) ) ) $ case (t1, t2) of
-  (VarN v1 t1, VarN v2 t2) -> True 
-  (TermN v1 t1, TermN v2 t2) -> {-(v1 == v2) && -}  (type1Equal t1 t2)
-  _ -> False
-
---toMain s = if (elem '.' s) then s else ("Main." ++ s)
-
-checkIfTotal
-  :: Environment
-  -> [P.CanonicalPattern]
-  -> ErrorT [PP.Doc] IO Bool
-checkIfTotal env [] = error "ERROR: can't have Case expression with no patterns"
-checkIfTotal env patList = do
-  let hasWildcard = (any containsWildcard patList)
-  let sortedPats = sortByCtor patList
-  let mapGet d k = case Map.lookup k d of
-        Nothing -> error $ "Key " ++ show k ++ " not in " ++ show (Map.keys d)
-        Just x -> x
-  case hasWildcard of
-    True -> trace ("HAS WILDCARD " ++ show patList) $ return True
-    False -> do
-      let allCtors = constructor env
-      let ctorNames = Map.keys allCtors
-      let tupleNames = filter (List.isPrefixOf "_Tuple") ctorNames
-      case tupleNames of
-        (_:_) -> return True
-        _ -> do
-          ctorValues <- mapM liftIO $ Map.elems allCtors
-          ourTypeInfo <- trace ("Ctor names " ++ show ctorNames ++ "\nmap Keys " ++ show (Map.keys allCtors) ) $ liftIO $ mapGet allCtors (tail $ fst $ head sortedPats) --remove underscore
-          let (_,_,_,ourType) = ourTypeInfo
-          let
-            ctorsForOurType =
-                filter (/= "_Tuple1") $
-                map fst $
-                filter (\(nm, (_,_,_,tp)) -> typeNEqual tp ourType) $ zip ctorNames ctorValues
-      
-          let
-            --ctorCovered :: Map.Map String [P.CanonicalPattern] -> String -> Bool
-            ctorCovered dict ctor  =
-                case (Map.lookup ("_" ++ ctor) dict) of
-                  Nothing -> return False
-                  Just subPats -> List.and `fmap` mapM (checkIfTotal env) subPats
-          coveredList <- mapM (ctorCovered $ Map.fromList sortedPats) ctorsForOurType
-          return $ trace ("Ctors for our type: " ++ show ctorsForOurType ++ "\nCovered List " ++ show coveredList ) $ List.and coveredList
-
+--Generate the annotation of all patterns which can be matched
+--By the given list of patterns
 typeForPatList
   :: Environment -> A.Region -> [P.CanonicalPattern]
     -> ErrorT [PP.Doc] IO Type
@@ -311,12 +237,102 @@ typeForPatList env region patList = do
         subTypes <- mapM (typeForPatList env region) subPats
         otherFields <- eachCtorHelper otherPats
         let ourRec = (trace "mkAnnot1" $ mkAnnot [(ctor, subTypes)] otherFields )
-        return ourRec -- $ subConsts /\ otherFieldConstr /\ ourRecConstr
+        return ourRec
 
-    {-eachArgHelper [] = return emptyRec
-    eachArgHelper ((fieldName, argPats) : otherPats) =
-      do
-        thisArgType <- typeForPatList region argPats
-        otherFields <- eachArgHelper otherPats
-        return   (directRecord [(fieldName, thisArgType)] otherFields ) -}
-        
+
+--Equality check for types, used for sorting through environments and getting constructor types
+type1Equal :: Term1 Type -> Term1 Type -> Bool
+type1Equal t1 t2 = case (t1, t2) of
+  (App1 t1a t1b, App1 t2a t2b) -> (typeNEqual t1a t2a) && (typeNEqual t1b t2b)
+  (Fun1 t1a t1b, App1 t2a t2b) -> (typeNEqual t1a t2a) && (typeNEqual t1b t2b)
+  (Var1 t1a, Var1 t2a) -> typeNEqual t1a t2a
+  (EmptyRecord1, EmptyRecord1) -> True
+  (Record1 fields1 t1b, Record1 fields2 t2b) ->
+    (fieldSubset fields1 fields2) && (fieldSubset fields2 fields1) && (typeNEqual t1b t2b)
+  _ -> False
+
+--Check if two types are literally identical
+--Equality check for types, used for sorting through environments and getting constructor types
+typeNEqual :: Type -> Type -> Bool
+typeNEqual t1 t2 = trace ("Comparing " ++ (show $ TP.pretty TP.Never t1  ) ++ " and " ++ ((show $ TP.pretty TP.Never t2  ) ) ) $ case (t1, t2) of
+  (VarN (Just n1) _, VarN (Just n2) _) -> trace "VAR JUST BASE CASE" $ n1 == n2
+  (VarN Nothing t1a, VarN Nothing t2a) -> let
+      desc1 = unsafePerformIO $ UF.descriptor t1a
+      desc2 = unsafePerformIO $ UF.descriptor t2a
+    in  trace ("DESCRIPTOR CASE " ++ (show $ name desc1) ++ "   " ++ show (name desc2 )) $ (name desc1 == name desc2)
+  (TermN (Just n1) t1, TermN (Just n2) t2) -> trace "TERM JUST BASE CASE" $ (n1 == n2) && (type1Equal t1 t2)
+  (TermN Nothing t1, TermN Nothing t2) -> trace "TERM NOTHING BASE CASE" $  (type1Equal t1 t2)
+  _ -> False
+
+isInfiniteLit p = case p of
+  P.Literal (Literal.IntNum _) -> True
+  P.Literal (Literal.Str _) -> True
+  P.Literal (Literal.Chr _) -> True --We assume chars may be infinite, in the case of Unicode
+  _ -> False
+
+--Given a list of patterns, determine if the pattern can match
+--any possible value of its type
+--This is used to ensure that complete pattern matches can match against Top,
+--Even in the case where no wildcard is present
+--Since integers have no constructors (only literals), this will never succeed for integers
+checkIfTotal
+  :: Environment
+  -> [P.CanonicalPattern]
+  -> ErrorT [PP.Doc] IO Bool
+checkIfTotal env rawPatList = trace ("\n\n\n\n\nCHECK IF TOTAL!!!\n" ++ show rawPatList) $ do
+  --An integer or string match will never be total
+  --TODO bools and such?
+  let patList = filter (not . isInfiniteLit) rawPatList
+  let hasWildcard = (any containsWildcard patList)
+  let sortedPats = sortByCtor patList
+  let mapGet d k = case Map.lookup k d of
+        Nothing -> error $ "Key " ++ show k ++ " not in " ++ show (Map.keys d)
+        Just x -> x
+  case (patList,hasWildcard) of
+    ([], _) -> return False
+    (_, True) -> trace ("HAS WILDCARD " ++ show patList) $ return True
+    (_,False) -> do
+      --TODO pattern match on Bool?
+      let allCtors = constructor env
+      let ctorNames = Map.keys allCtors
+      
+      ctorValues <- mapM liftIO $ Map.elems allCtors
+      ourTypeInfo <- liftIO $ mapGet allCtors (tail $ fst $ head sortedPats) --remove underscore
+      let (_,_,_,ourType) = ourTypeInfo
+      let
+        ctorsForOurType =
+                filter (/= "_Tuple1") $
+                map fst $
+                filter (\(_, (_,_,_,tp)) -> trace ("ARE EQUAL? " ++ showType ourType ++ "   " ++ showType tp ++ (show $ typeNEqual tp ourType ) ) $ typeNEqual tp ourType) $ zip ctorNames ctorValues
+      
+      let tupleNames = filter (List.isPrefixOf "__Tuple") $ map fst sortedPats
+      case (trace ("TUPLE NAMES: " ++ show tupleNames) $ tupleNames) of
+        (_:_) -> trace ("TUPLE NAMES: " ++ show tupleNames) $ return True
+        _ -> do
+          let
+            --ctorCovered :: Map.Map String [P.CanonicalPattern] -> String -> Bool
+            ctorCovered dict ctor  = trace  ("CTORS FOR OUR TYPE: " ++ show ctorsForOurType ) $
+                case (Map.lookup ("_" ++ ctor) dict) of
+                  Nothing -> return False
+                  Just subPats -> List.and `fmap` mapM (checkIfTotal env) subPats
+          coveredList <- mapM (ctorCovered $ Map.fromList sortedPats) ctorsForOurType
+          return $ trace ("Ctors for our type: " ++ show ctorsForOurType ++ "\nCovered List " ++ show coveredList ) $ List.and coveredList
+
+
+--Very Boring, constraint rules for literal patterns
+--Constrain just like expression literals, but we don't leave the possible set of values open
+--This is for cases where we match against a literal and know its exact value
+constrainLiteral env region lit tipe =
+  let
+    t1 === t2 = A.A region (CEqual t1 t2)
+  in case lit of
+        (Literal.IntNum n) -> 
+          return $ tipe === closedAnnot [("_" ++ show n, [])] 
+        (Literal.FloatNum f) -> 
+          return $ tipe === closedAnnot [("_" ++ show f, [])] 
+        (Literal.Chr u) -> 
+          return $ tipe === closedAnnot [("_" ++ show u, [])] 
+        (Literal.Str s) -> 
+          return $ tipe === closedAnnot [("_" ++ show s, [])] 
+        (Literal.Boolean b) -> 
+          return $ tipe === closedAnnot [("_" ++ show b, [])] 

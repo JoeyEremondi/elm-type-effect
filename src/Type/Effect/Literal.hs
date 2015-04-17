@@ -23,7 +23,10 @@ import Type.Effect.Common
 
 import Debug.Trace (trace)
 
-constrain env region lit tipe =
+--Very Boring, constraint rules for literal patterns
+--Constrain just like expression literals, but we don't leave the possible set of values open
+--This is for cases where we match against a literal and know its exact value
+constrainLiteral env region lit tipe =
   let
     t1 === t2 = A region (CEqual t1 t2)
   in case lit of
