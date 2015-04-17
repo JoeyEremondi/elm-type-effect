@@ -257,23 +257,27 @@ checkIfTotal env patList = do
     False -> do
       let allCtors = constructor env
       let ctorNames = Map.keys allCtors
-      ctorValues <- mapM liftIO $ Map.elems allCtors
-      ourTypeInfo <- trace ("Ctor names " ++ show ctorNames ++ "\nmap Keys " ++ show (Map.keys allCtors) ) $ liftIO $ mapGet allCtors (tail $ fst $ head sortedPats) --remove underscore
-      let (_,_,_,ourType) = ourTypeInfo
-      let
-        ctorsForOurType =
-            filter (/= "_Tuple1") $
-            map fst $
-            filter (\(nm, (_,_,_,tp)) -> typeNEqual tp ourType) $ zip ctorNames ctorValues
+      let tupleNames = filter (List.isPrefixOf "_Tuple") ctorNames
+      case tupleNames of
+        (_:_) -> return True
+        _ -> do
+          ctorValues <- mapM liftIO $ Map.elems allCtors
+          ourTypeInfo <- trace ("Ctor names " ++ show ctorNames ++ "\nmap Keys " ++ show (Map.keys allCtors) ) $ liftIO $ mapGet allCtors (tail $ fst $ head sortedPats) --remove underscore
+          let (_,_,_,ourType) = ourTypeInfo
+          let
+            ctorsForOurType =
+                filter (/= "_Tuple1") $
+                map fst $
+                filter (\(nm, (_,_,_,tp)) -> typeNEqual tp ourType) $ zip ctorNames ctorValues
       
-      let
-        --ctorCovered :: Map.Map String [P.CanonicalPattern] -> String -> Bool
-        ctorCovered dict ctor  =
-            case (Map.lookup ("_" ++ ctor) dict) of
-              Nothing -> return False
-              Just subPats -> List.and `fmap` mapM (checkIfTotal env) subPats
-      coveredList <- mapM (ctorCovered $ Map.fromList sortedPats) ctorsForOurType
-      return $ trace ("Ctors for our type: " ++ show ctorsForOurType ++ "\nCovered List " ++ show coveredList ) $ List.and coveredList
+          let
+            --ctorCovered :: Map.Map String [P.CanonicalPattern] -> String -> Bool
+            ctorCovered dict ctor  =
+                case (Map.lookup ("_" ++ ctor) dict) of
+                  Nothing -> return False
+                  Just subPats -> List.and `fmap` mapM (checkIfTotal env) subPats
+          coveredList <- mapM (ctorCovered $ Map.fromList sortedPats) ctorsForOurType
+          return $ trace ("Ctors for our type: " ++ show ctorsForOurType ++ "\nCovered List " ++ show coveredList ) $ List.and coveredList
 
 typeForPatList
   :: Environment -> A.Region -> [P.CanonicalPattern]

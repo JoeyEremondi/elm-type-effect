@@ -30,7 +30,12 @@ import Type.Effect.Common
 --import Debug.Trace (trace)
 
 trace _ x = x
-t1 =-> t2 = closedAnnot [("_Lambda", [t1, t2])]
+
+newVar = varN `fmap` (liftIO $ variable Flexible)
+
+makeFn t1 t2 = do
+  restOfRec <- newVar
+  return $ mkAnnot [("_Lambda", [t1, t2])] restOfRec
 
 constrain
     :: Env.Environment
@@ -49,11 +54,10 @@ constrain env (A region expr) tipe = trace (" Constrain " ++ (show $ pretty expr
         
         --emptyRec = termN EmptyRecord1
         bool = Env.get env Env.types "Bool"
-        --top = Env.get env Env.types "Int"
+        top = Env.get env Env.types "Int"
         isTop t =
-          exists $ \tArg ->
-          exists $ \tBody ->
-            return $ (t === (tArg =-> tBody))
+          exists $ \restOfRec ->
+            return $ (t === mkAnnot [("__Top", [])] restOfRec)
         
         
     in
@@ -76,7 +80,7 @@ constrain env (A region expr) tipe = trace (" Constrain " ++ (show $ pretty expr
       --Native can be any function, but we always make it a function
       --Meaning for non-function values, we MUST match against it with _
       --This deals with the fact that there are infinite integer constructors
-      Var (V.Canonical (V.Module ("Native":_)) _) -> isTop tipe
+      Var (V.Canonical (V.Module ("Native":_)) _) -> return true --isTop tipe
       --Special case: Native is a Rigid type variable, could be anything
       {-
       Var (V.Canonical (V.Module ("Native":_)) _) -> do
@@ -128,12 +132,15 @@ constrain env (A region expr) tipe = trace (" Constrain " ++ (show $ pretty expr
             --TODO adjust this for annotations
             c <- return $ ex (vars fragment) (clet [monoscheme (typeEnv fragment)]
                                              ( c2 ))
-            let retConstr = typeConstraint fragment /\ cMatch /\ c /\ tipe === (targ =-> tbody)
+            fnTy <- makeFn targ tbody
+            let retConstr =
+                  typeConstraint fragment /\ cMatch /\ c /\ tipe === fnTy
             return retConstr
           
       App e1 e2 -> 
           exists $ \t -> do
-            c1 <- constrain env e1 (t =-> tipe)
+            fnTy <- makeFn t tipe
+            c1 <- constrain env e1 fnTy
             c2 <- constrain env e2 t --TODO where do we speicify direction of subtyping?
             return $ c1 /\ c2
 
@@ -274,19 +281,20 @@ constrainCtor region env rawName tipe = trace "DATA one " $ do
         doWithArgTypes typeVars theKey arity []
         where
           
-          doWithArgTypes typeVars nm 0 argTypes =
-            exists $ \restOfRecord -> do
-            let
-              --TODO closed or open?
-              ctorRetType nm = mkAnnot [("_" ++ nm, argTypes )] restOfRecord
-              ctorAnnotation nm = --applyTypeVars typeVars
-                makeCtorType (reverse argTypes) $ ctorRetType nm
-            return $ A region $ CEqual tipe (ctorAnnotation nm)
+          doWithArgTypes typeVars nm 0 argTypes = exists $ \restOfRecord ->
+              do
+                let ctorRetType = mkAnnot [("_" ++ nm, argTypes )] restOfRecord
+                ctorAnnotation <- makeCtorType (reverse argTypes) ctorRetType
+                return $ A region $ CEqual tipe (ctorAnnotation)
+          
           doWithArgTypes typeVars nm arity argTypes =
             exists $ \t ->
               doWithArgTypes typeVars nm (arity - 1) (t:argTypes)
           --Constructor take
-          makeCtorType [] ret = ret
-          makeCtorType (arg:argRest) ret = trace "MCT" $ makeCtorType argRest (arg =-> ret)
+          makeCtorType [] ret = return ret
+          makeCtorType (arg:argRest) ret = do
+            fnTy <- makeFn arg ret
+            makeCtorType argRest fnTy
           --applyTypeVars [] ty = ty
           --applyTypeVars (var:vars) ty = applyTypeVars vars (ty <| (varN var) )
+
