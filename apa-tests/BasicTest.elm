@@ -1,17 +1,24 @@
+{-
+Test file
+
+Joseph Eremondi
+UU# 4229924
+APA Project 2
+April 17, 2015
+-}
+
 import List
 
 --and x y = True
 
-type Foo = Foo | Bar
+type Foo = Foo | Bar | Baz
 
-{-
-val = 
-  let
-    x = ((\y -> 
-      case y of
-        Bar -> 3) Foo)
-  in 3
--}
+fooFun x = case x of
+  Foo -> 20
+  Bar -> 30
+
+goodFooTest = (fooFun Foo) + (fooFun Bar)
+badFooTest = (fooFun Foo) + (fooFun Baz)
 
 
 --Check list cases
@@ -96,3 +103,39 @@ poisonJoin2 comp = case (reverseComparison LT) of
 --This one obviously should not succeed
 badJoin 1 = case (reverseComparison LT) of
   LT -> 3
+
+
+-- Nesting Data structures
+complicatedMaybeList x = case x of
+  Just ([Just ([], Just 3), Just ([3,4,5], Nothing) ]) -> 100
+  Just (Nothing :: _) -> 200
+
+--Should succeed: shows that we can match patterns arbitrarily deep
+goodDeepMatch = let
+    v1 = complicatedMaybeList <| Just ([Just ([], Just 3), Just ([3,4,5], Nothing) ])
+    v2 = complicatedMaybeList <| Just ([Nothing, Just ([], Nothing )])
+  in v1 + v2
+
+--Fails because the above function can't take Nothing
+badDeepMatch = let
+    v1 = complicatedMaybeList <| Just ([Just ([], Just 3), Just ([3,4,5], Nothing) ])
+    v2 = complicatedMaybeList <| Just ([Nothing, Just ([], Nothing )])
+    v3 = complicatedMaybeList Nothing
+  in v1 + v2 + v3
+
+
+fromJust x = case x of
+  Just y -> y
+
+intFromJust x = case x of
+  Just y -> y
+  Nothing -> -99
+
+--Shows that polyvariance works
+higherOrderFromJust f x y = (f x) + (f y)
+
+goodFromJust1 = higherOrderFromJust fromJust (Just 3) (Just 4)
+
+goodFromJust2 = higherOrderFromJust intFromJust (Just 3) Nothing
+
+badFromJust =   higherOrderFromJust fromJust (Just 3) Nothing

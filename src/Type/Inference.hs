@@ -1,5 +1,10 @@
 
-
+{-
+Joseph Eremondi
+UU# 4229924
+APA Project 2
+April 17, 2015
+-}
 module Type.Inference where
 
 import qualified Data.Map as Map
@@ -54,12 +59,15 @@ infer interfaces modul =
         let header' = Map.delete "::" header
             types = Map.difference (TS.sSavedEnv state) header'
 
+        --Added for APA project 2
         annots <- case checkTotality interfaces modul of
           Left hints -> throwError hints
           Right ann -> return ann 
         --let annots = Map.empty :: Map.Map String CanonicalType
 
         typeResult <-  Check.mainType types
+
+        --Added for APA project 2
         liftIO $ putStrLn "Type Annotations:"
         liftIO $ forM (Map.toList annots) $ \(val, tip) -> do
           putStrLn $ val ++ " :: " ++ render (AP.pretty tip)
@@ -68,7 +76,9 @@ infer interfaces modul =
         return (typeResult, annots)
 
 
-
+------------------
+--Added for APA Project 2
+------------------
 checkTotality :: Interfaces -> CanonicalModule -> Either [Doc] (Map.Map String CanonicalType)
 checkTotality interfaces modul =
   unsafePerformIO  $ runErrorT $
@@ -84,7 +94,9 @@ checkTotality interfaces modul =
         Check.toCanon types
         
 
-
+------------------
+--Added for APA Project 2
+------------------
 genTotalityConstraints
     :: Interfaces
     -> CanonicalModule

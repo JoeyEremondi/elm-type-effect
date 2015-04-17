@@ -1,3 +1,11 @@
+{-
+Joseph Eremondi
+UU# 4229924
+APA Project 2
+April 17, 2015
+-}
+
+
 {-# LANGUAGE ScopedTypeVariables #-}
 module Type.Effect.Expression where
 
