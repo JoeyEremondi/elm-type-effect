@@ -280,6 +280,14 @@ constrain env (A region expr) tipe = trace (" Constrain " ++ (show $ pretty expr
               /\ otherConstr
               /\ tipe === directRecord [(nm, fieldType)] restOfRec
 
+
+
+--Constrain a definition
+--Most of this is just dealing with schemes
+--We ignore any type annotations, since they don't tell us about pattern matching
+--Then we generate the constraints for the definition values
+--With the defined variables added to their environment
+--This is also where we close over schemes, since we have Let polymorphism
 constrainDef region env info (Canonical.Definition pattern expr maybeTipe) =
     let qs = [] -- should come from the def, but I'm not sure what would live there...
         (schemes, rigidQuantifiers, flexibleQuantifiers, headers, c2, c1) = info
@@ -302,7 +310,7 @@ constrainDef region env info (Canonical.Definition pattern expr maybeTipe) =
 
          _ -> error ("problem in constrainDef with " ++ show pattern)
 
-
+--Helper function, was in the original Elm code
 expandPattern :: Canonical.Def -> [Canonical.Def]
 expandPattern def@(Canonical.Definition pattern lexpr@(A r _) _maybeType) =
     case pattern of
@@ -314,7 +322,7 @@ expandPattern def@(Canonical.Definition pattern lexpr@(A r _) _maybeType) =
             mkVar = A r . localVar
             toDef y = Canonical.Definition (P.Var y) (A r $ Case (mkVar x) [(pattern, mkVar y)]) Nothing
 
-
+--Helper function, was in the original Elm code
 try :: Region -> ErrorT (Region -> PP.Doc) IO a -> ErrorT [PP.Doc] IO a
 try region computation =
   do  result <- liftIO $ runErrorT computation
@@ -322,7 +330,11 @@ try region computation =
         Left err -> throwError [err region]
         Right value -> return value
 
---TODO how to make this polyvariant?
+--To constrain a constructor
+--We get its function type from our environment
+--We annotate it as a function which can accept any arguments
+--And which is annotated with the given constructor
+--And possibly more values
 constrainCtor region env rawName tipe = trace "DATA one " $ do
         let qualName =
               if ('.' `elem` rawName)
