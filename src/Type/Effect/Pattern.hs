@@ -24,8 +24,8 @@ import qualified Type.PrettyPrint as TP
 
 import System.IO.Unsafe (unsafePerformIO)
 
-import Debug.Trace (trace)
---trace _ x = x
+--import Debug.Trace (trace)
+trace _ x = x
 
 --Find the annotations that a variable matching a pattern must have
 --And return those constraints, along with the "fragment"
