@@ -14,15 +14,16 @@ import qualified Control.Monad as Monad
 import Control.Monad.Error
 import qualified Data.List as List
 import qualified Data.Map as Map
-import qualified Text.PrettyPrint as PP
+import qualified Text.PrettyPrint  as PP
 
 import AST.Literal as Lit
-import Reporting.Annotation as Ann
+import Reporting.Annotation as Ann hiding (map)
 import AST.Expression.General
 import qualified AST.Expression.Canonical as Canonical
 import qualified AST.Pattern as P
 import Reporting.PrettyPrint (pretty)
 import qualified Reporting.PrettyPrint as TP
+import qualified Reporting.Region as R
 import qualified AST.Type as ST
 import qualified AST.Variable as V
 import Type.Type hiding (Descriptor(..))
@@ -30,6 +31,8 @@ import Type.Fragment
 import qualified Type.Environment as Env
 import qualified Type.Effect.Literal as Literal
 import qualified Type.Effect.Pattern as Pattern
+
+import qualified Reporting.Error.Type as RErr
 
 import Data.Char (isUpper)
 
@@ -60,16 +63,16 @@ constrain
     :: Env.Environment
     -> Canonical.Expr
     -> Type
-    -> ErrorT [PP.Doc] IO TypeConstraint
-constrain env (A region expr) tipe = trace (" Constrain " ++ (show $ pretty expr)) $
+    -> IO TypeConstraint
+constrain env (A region expr) tipe = 
     let list t = Env.get env Env.types "List" <| t
-        and = A region . CAnd
-        true = A region CTrue
-        t1 === t2 = A region (CEqual t1 t2)
+        and = CAnd
+        true = CTrue
+        t1 === t2 = CEqual RErr.None region t1 t2
         t1 ==> t2 = error "BAD LAMBDA TODO"--
          --We override this for our fn def
-        x <? t = A region (CInstance x t)
-        clet schemes c = A region (CLet schemes c)
+        x <? t = (CInstance region x t)
+        clet schemes c = CLet schemes c
         
         --emptyRec = termN EmptyRecord1
         bool = Env.get env Env.types "Bool"
@@ -82,15 +85,15 @@ constrain env (A region expr) tipe = trace (" Constrain " ++ (show $ pretty expr
     in
     case expr of
       Literal lit -> case lit of
-        (IntNum n) -> exists $ \restOfRec ->
+        (IntNum n) -> liftIO $ exists $ \restOfRec ->
           return $ trace "mkAnnot expr" $ tipe === mkAnnot [("_" ++ show n, [])] restOfRec
-        (FloatNum f) -> exists $ \restOfRec ->
+        (FloatNum f) -> liftIO $ exists $ \restOfRec ->
           return $ tipe === mkAnnot [("_" ++ show f, [])] restOfRec
-        (Chr u) -> exists $ \restOfRec ->
+        (Chr u) -> liftIO $ exists $ \restOfRec ->
           return $ tipe === mkAnnot [("_" ++ show u, [])] restOfRec
-        (Str s) -> exists $ \restOfRec ->
+        (Str s) -> liftIO $ exists $ \restOfRec ->
           return $ tipe === mkAnnot [("_" ++ show s, [])] restOfRec
-        (Boolean b) -> exists $ \restOfRec ->
+        (Boolean b) -> liftIO $ exists $ \restOfRec ->
           return $ tipe === mkAnnot [("_" ++ show b, [])] restOfRec
 
       GLShader _uid _src gltipe -> return true --We never pattern match against GLSL shaders
@@ -99,37 +102,38 @@ constrain env (A region expr) tipe = trace (" Constrain " ++ (show $ pretty expr
       --Native can be any function, but we always make it a function
       --Meaning for non-function values, we MUST match against it with _
       --This deals with the fact that there are infinite integer constructors
-      Var (V.Canonical (V.Module ("Native":_)) _) -> isTop tipe
+      Var (V.Canonical (V.Module ("Native":_)) _) -> liftIO $  isTop tipe
 
 
       --Variable has annotation that we look up in the environment
       Var var
-          | name == saveEnvName -> return (A region CSaveEnv)
+          | name == saveEnvName -> return CSaveEnv
           | otherwise           -> return (name <? tipe)
           where
             name = V.toString var
 
       --A range could be empty, so we set its annotation to top
       Range lo hi ->
-        exists $ \tlo ->
+        liftIO $ exists $ \tlo ->
         exists $ \thi -> do
+          --TODO make this safe!
           c1 <- constrain env lo tlo
           c2 <- constrain env hi thi
           isTopConstr <- isTop tipe
           return $ c1 /\ c2 /\ isTopConstr
 
       --We know that [] is never a cons
-      ExplicitList [] -> exists $ \restOfRec ->
+      ExplicitList [] -> liftIO $ exists $ \restOfRec ->
         return $ tipe === mkAnnot [("_[]", [])] restOfRec
 
      --We know that an explicit list that's not empty will start with a cons
       --Then we recursively annotate the rest of the list
       ExplicitList (firstExp:others) ->
-        exists $ \restOfRec ->
+        liftIO $ exists $ \restOfRec ->
         exists $ \exprType ->
         exists $ \subListType -> do
           exprConstr <- constrain env firstExp exprType
-          subListConstr <- constrain env (A region $ ExplicitList others) subListType
+          subListConstr <-  constrain env (A region $ ExplicitList others) subListType
           let isConsConstr = tipe === mkAnnot [("_::", [exprType, subListType])] restOfRec
           return $ exprConstr /\ subListConstr /\ isConsConstr
       
@@ -157,7 +161,7 @@ constrain env (A region expr) tipe = trace (" Constrain " ++ (show $ pretty expr
       Lambda p e ->
           exists $ \targ ->
           exists $ \tbody -> do
-            fragment <- try region $ Pattern.constrain env p targ
+            fragment <- Pattern.constrain env p targ
             --TODO constrain arg types
             c2 <- constrain env e tbody
             --Make sure the argument type is only the patterns matched
@@ -198,7 +202,7 @@ constrain env (A region expr) tipe = trace (" Constrain " ++ (show $ pretty expr
       --Additionally, we ensure that the annotation of the expression matched against
       --Is a subtype of the patterns that can be matched
       --We also do some manipulation with fragments (variables) bound by pattern matches
-      Case ex branches -> trace ("CASE: Type " ++ show (TP.pretty TP.App tipe)) $
+      Case ex branches -> 
           exists $ \texp ->
           exists $ \tReturn -> do
             --t is the type of the expression we match against 
@@ -210,7 +214,7 @@ constrain env (A region expr) tipe = trace (" Constrain " ++ (show $ pretty expr
                   exists $ \retAnnot -> 
                   exists $ \patType -> do
                     --let recType = _
-                    fragment <- try region $ Pattern.constrain  env p patType --texp
+                    fragment <- Pattern.constrain  env p patType --texp
                     letConstr <- clet [toScheme fragment] <$> constrain env e retAnnot 
                     return $ letConstr -- /\ retAnnot === tipe
             resultConstr <- and . (:) ce <$> mapM branchConstraints branches
@@ -225,7 +229,7 @@ constrain env (A region expr) tipe = trace (" Constrain " ++ (show $ pretty expr
       --And returning something tagged with (at least) its constructor
       --We also constrain that there exists some (possibly empty) set of other constructors it can take
       --This allows for sub-effecting
-      Data rawName [] -> trace ("DATA single " ++ rawName) $ constrainCtor region env rawName tipe
+      Data rawName [] -> constrainCtor region env rawName tipe
 
       --We treat constructor application with args as a function call
       Data rawName args -> trace "DATA multi " $ do
@@ -319,6 +323,7 @@ constrain env (A region expr) tipe = trace (" Constrain " ++ (show $ pretty expr
 --Then we generate the constraints for the definition values
 --With the defined variables added to their environment
 --This is also where we close over schemes, since we have Let polymorphism
+--constrainDef :: R.Region -> Env.Environment -> Info -> Canonical.Def
 constrainDef region env info (Canonical.Definition pattern expr maybeTipe) =
     let qs = [] -- should come from the def, but I'm not sure what would live there...
         (schemes, rigidQuantifiers, flexibleQuantifiers, headers, c2, c1) = info
@@ -326,7 +331,7 @@ constrainDef region env info (Canonical.Definition pattern expr maybeTipe) =
     do rigidVars <- forM qs (\_ -> liftIO $ variable Rigid) -- Some mistake may be happening here.
                                                        -- Currently, qs is always [].
        case pattern of
-         (P.Var name) -> do
+         (A _ (P.Var name)) -> do
              v <- liftIO $ variable Flexible
              let tipe = varN v
                  inserts = zipWith (\arg typ -> Map.insert arg (varN typ)) qs rigidVars
@@ -335,7 +340,7 @@ constrainDef region env info (Canonical.Definition pattern expr maybeTipe) =
              return ( schemes
                     , rigidVars ++ rigidQuantifiers
                     , v : flexibleQuantifiers
-                    , Map.insert name tipe headers
+                    , Map.insert name (A region tipe) headers
                     , c /\ c2
                     , c1 )
 
@@ -343,23 +348,15 @@ constrainDef region env info (Canonical.Definition pattern expr maybeTipe) =
 
 --Helper function, was in the original Elm code
 expandPattern :: Canonical.Def -> [Canonical.Def]
-expandPattern def@(Canonical.Definition pattern lexpr@(A r _) _maybeType) =
+expandPattern def@(Canonical.Definition pa@(A region pattern) lexpr@(A r _) _maybeType) =
     case pattern of
       P.Var _ -> [def]
-      _ -> Canonical.Definition (P.Var x) lexpr Nothing : map toDef vars --we ignore type sigs
+      _ -> Canonical.Definition (A region (P.Var x)) lexpr Nothing : map toDef vars --we ignore type sigs
           where
-            vars = P.boundVarList pattern
+            vars = P.boundVarList pa
             x = "$" ++ concat vars
             mkVar = A r . localVar
-            toDef y = Canonical.Definition (P.Var y) (A r $ Case (mkVar x) [(pattern, mkVar y)]) Nothing
-
---Helper function, was in the original Elm code
-try :: Region -> ErrorT (Region -> PP.Doc) IO a -> ErrorT [PP.Doc] IO a
-try region computation =
-  do  result <- liftIO $ runErrorT computation
-      case result of
-        Left err -> throwError [err region]
-        Right value -> return value
+            toDef y = Canonical.Definition (A region (P.Var y)) (A r $ Case (mkVar x) [(pa, mkVar y)]) Nothing
 
 --To constrain a constructor
 --We get its function type from our environment
@@ -392,7 +389,7 @@ constrainCtor region env rawName tipe = trace "DATA one " $ do
               do
                 let ctorRetType = mkAnnot [("_" ++ nm, argTypes )] restOfRecord
                 ctorAnnotation <- makeCtorType (reverse argTypes) ctorRetType
-                return $ A region $ CEqual tipe (ctorAnnotation)
+                return $ CEqual RErr.None region tipe (ctorAnnotation)
           
           doWithArgTypes typeVars nm arity argTypes =
             exists $ \t ->

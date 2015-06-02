@@ -43,7 +43,7 @@ trace _ x = x
 --In the Elm type system, fragments contain new variables defined
 --By patterns, as well as constraints on them
 constrain :: Environment -> P.CanonicalPattern -> Type
-          -> ErrorT (R.Region -> PP.Doc) IO Fragment
+          -> IO Fragment
 constrain env (A.A _ pattern) tipe =
     --TODO what is sensible default for here?
     let region = R.Region (R.Position 0 0 ) (R.Position 0 0 ) --_ --A.None (pretty pattern)
@@ -68,7 +68,7 @@ constrain env (A.A _ pattern) tipe =
                           n :: Int
                           n = num
                   --TODO make this safe?
-                  (Right ourFieldFrag) <- runErrorT $ constrain env currentPat fieldAnnot
+                  ourFieldFrag <- constrain env currentPat fieldAnnot
                   newConstr <-
                       liftIO $ exists $ \restOfRec -> do
                       --exists $ \fieldAnnot -> do
@@ -85,7 +85,7 @@ constrain env (A.A _ pattern) tipe =
 
       --We know the exact value of a literal
       P.Literal lit -> do
-          c <-  constrainLiteral env region lit tipe
+          c <- constrainLiteral env region lit tipe
           return $ emptyFragment { typeConstraint = c }
 
       --Variable: could have any annotations, so use a fresh typeVar
@@ -208,7 +208,7 @@ containsWildcard (A.A _ pat) =
 --Return the constraint that every possible constructor the value can take
 --Must be able to be matched by the patterns
 allMatchConstraints env argType region patList = do
-  typeCanMatch <- runErrorT $ typeForPatList env region patList
+  typeCanMatch <- typeForPatList env region patList
   return $ (argType === typeCanMatch)
     where t1 === t2 = CEqual RErr.None region t1 t2
 
@@ -342,7 +342,7 @@ constrainLiteral
   -> R.Region
   -> Literal.Literal
   -> Type
-  -> ErrorT (R.Region -> PP.Doc) IO TypeConstraint
+  -> IO TypeConstraint
 constrainLiteral env region lit tipe =
   let
     t1 === t2 = (CEqual RErr.None region t1 t2)
