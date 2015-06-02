@@ -17,6 +17,7 @@ import qualified Data.Map as Map
 import qualified Text.PrettyPrint as PP
 
 import qualified Reporting.Annotation as A
+import qualified Reporting.Region as R
 import qualified AST.Pattern as P
 import qualified AST.Variable as V
 import Reporting.PrettyPrint (pretty)
@@ -27,6 +28,8 @@ import qualified AST.Literal as Literal
 import Type.Effect.Common
 import qualified Data.List as List
 import qualified Data.UnionFind.IO as UF
+
+import qualified Reporting.Error.Type as RErr
 
 import qualified Type.PrettyPrint as TP
 
@@ -40,11 +43,11 @@ trace _ x = x
 --In the Elm type system, fragments contain new variables defined
 --By patterns, as well as constraints on them
 constrain :: Environment -> P.CanonicalPattern -> Type
-          -> ErrorT (A.Region -> PP.Doc) IO Fragment
-constrain env pattern tipe = 
-    let region = A.None (pretty pattern)
+          -> ErrorT (R.Region -> PP.Doc) IO Fragment
+constrain env (A.A _ pattern) tipe = 
+    let region = _ --A.None (pretty pattern)
         newVar = varN `fmap` (liftIO $ variable Flexible)
-        t1 === t2 = A.A region (CEqual t1 t2)
+        t1 === t2 = CEqual RErr.None region t1 t2
         --genSubTypeConstr :: Type -> [P.CanonicalPattern] -> Int -> TypeConstraint -> TypeConstraint
 
         --Helper function: given the sub-patterns of a pattern match
@@ -52,6 +55,7 @@ constrain env pattern tipe =
         --With their precise values
         --Nothing fancy, really just looping over the patterns
         --And joining their fragments, recusively calling constrain on them
+        genSubTypeConstr :: Type -> [P.CanonicalPattern] -> Int -> Fragment -> IO Fragment
         genSubTypeConstr ty patList num frag = do
           let thePatList :: [P.CanonicalPattern]
               thePatList = patList
@@ -62,13 +66,14 @@ constrain env pattern tipe =
                   let
                           n :: Int
                           n = num
-                  ourFieldFrag <- constrain env currentPat fieldAnnot
+                  --TODO make this safe?
+                  (Right ourFieldFrag) <- runErrorT $ constrain env currentPat fieldAnnot
                   newConstr <-
-                      exists $ \restOfRec -> do
+                      liftIO $ exists $ \restOfRec -> do
                       --exists $ \fieldAnnot -> do
                         let constr = typeConstraint frag 
                         
-                        let ourFieldConstr = ty === (directRecord [("_sub" ++ show n, fieldAnnot)] restOfRec)
+                        let ourFieldConstr = _ --ty === (directRecord [("_sub" ++ show n, fieldAnnot)] restOfRec)
                         return $ constr /\ ourFieldConstr
                   let newFrag = joinFragments [frag, ourFieldFrag {typeConstraint = newConstr}]
                   genSubTypeConstr ty rest (n+1) newFrag 
@@ -79,14 +84,14 @@ constrain env pattern tipe =
 
       --We know the exact value of a literal
       P.Literal lit -> do
-          c <- liftIO $ constrainLiteral env region lit tipe
+          c <-  constrainLiteral env region lit tipe
           return $ emptyFragment { typeConstraint = c }
 
       --Variable: could have any annotations, so use a fresh typeVar
       P.Var name -> do
           v <- liftIO $ variable Flexible
           return $ Fragment {
-              typeEnv    = Map.singleton name (varN v),
+              typeEnv    = Map.singleton name ( _ {-varN v-}),
               vars       = [v],
               typeConstraint = varN v === tipe
           }
@@ -99,7 +104,7 @@ constrain env pattern tipe =
           fragment <- constrain env p tipe
           --TODO this case? Constrain alias?
           return $ fragment
-            { typeEnv = Map.insert name varType (typeEnv fragment)
+            { typeEnv = Map.insert name _ {-varType-} (typeEnv fragment)
             , vars    = v : vars fragment
             , typeConstraint = varType === tipe /\ typeConstraint fragment
             }
@@ -109,14 +114,14 @@ constrain env pattern tipe =
       P.Data name patterns -> do
           --TODO is this the right args?
           (kind, cvars, args, result) <- liftIO $ freshDataScheme env (V.toString name)
-          argTypes <- mapM (\_ -> newVar) args
+          argTypes <- liftIO $ mapM (\_ -> newVar) args
           fragment <- Monad.liftM joinFragments (Monad.zipWithM (constrain env) patterns argTypes)
           --return fragment --TODO right?
           --We don't constrain at all here, since we already did the pattern match check
           --TODO let-expression for special cases?
               
           recordStructureConstr <-
-            exists $ \recordSubType ->
+            liftIO $ exists $ \recordSubType ->
             exists $ \restOfRec -> do
              let ctorFieldConstr =
                    tipe === directRecord [("_" ++ V.toString name, recordSubType )] restOfRec
@@ -135,15 +140,15 @@ constrain env pattern tipe =
       P.Record fields -> do
           pairs <- liftIO $ mapM (\name -> (,) name <$> variable Flexible) fields
           let tenv = Map.fromList (map (second varN) pairs)
-          c <- exists $ \t -> return (tipe === record (Map.map (:[]) tenv) t)
+          c <- liftIO $ exists $ \t -> return (tipe === record (Map.map (:[]) tenv) t)
           return $ Fragment {
-              typeEnv        = tenv,
+              typeEnv        = _, -- tenv,
               vars           = map snd pairs,
               typeConstraint = c
           }
 
 
-instance Error (A.Region -> PP.Doc) where
+instance Error (R.Region -> PP.Doc) where
   noMsg _ = PP.empty
   strMsg str span =
       PP.vcat [ PP.text $ "Type error " ++ show span
@@ -152,7 +157,7 @@ instance Error (A.Region -> PP.Doc) where
 
 --Given a pattern, return name of the top constructor in the pattern
 ctorName :: P.CanonicalPattern -> String
-ctorName pat = case pat of
+ctorName (A.A _ pat) = case pat of
   (P.Data name p2) -> "_" ++ V.toString name
   (P.Record p) -> ""
   (P.Alias p1 p2) -> ctorName p2
@@ -176,8 +181,8 @@ sortByCtor patList =
   let
     --TODO sort other than by CTOR?
     allNames = (List.nub $ map (ctorName) patList)
-    maybeAddName name pat subPatList = case pat of
-      P.Data name2 pats -> if (name == ctorName pat) then (pats : subPatList) else subPatList
+    maybeAddName name pa@(A.A _ pat) subPatList = case pat of
+      P.Data name2 pats -> if (name == ctorName pa) then (pats : subPatList) else subPatList
       (P.Record e) -> subPatList
       (P.Alias e1 e2) -> maybeAddName name e2 subPatList
       (P.Var e) -> subPatList --Ignor naze these, we should catch this earlier
@@ -190,7 +195,7 @@ sortByCtor patList =
 --Check if a pattern can match any expression
 --Basically check for a variable or underscore
 containsWildcard :: P.CanonicalPattern -> Bool
-containsWildcard pat =
+containsWildcard (A.A _ pat) =
   case pat of
     (P.Alias p1 p2) -> containsWildcard p2
     (P.Var p) -> True
@@ -202,9 +207,9 @@ containsWildcard pat =
 --Return the constraint that every possible constructor the value can take
 --Must be able to be matched by the patterns
 allMatchConstraints env argType region patList = do
-  typeCanMatch <- typeForPatList env region patList
-  return $ trace ("!!! Pattern match type : " ++ show (TP.pretty TP.App typeCanMatch) ) $ (argType === typeCanMatch)
-    where t1 === t2 = A.A region (CEqual t1 t2)
+  typeCanMatch <- runErrorT $ typeForPatList env region patList
+  return $ (argType === typeCanMatch)
+    where t1 === t2 = CEqual RErr.None region t1 t2
 
 
 fieldSubset :: (Map.Map String [Type]) -> (Map.Map String [Type]) -> Bool
@@ -226,7 +231,7 @@ fieldSubset f1 f2 =
 --Generate the annotation of all patterns which can be matched
 --By the given list of patterns
 typeForPatList
-  :: Environment -> A.Region -> [P.CanonicalPattern]
+  :: Environment -> R.Region -> [P.CanonicalPattern]
     -> ErrorT [PP.Doc] IO Type
 typeForPatList env region patList = do
   isTotal <- checkIfTotal env patList
@@ -272,7 +277,8 @@ typeNEqual t1 t2 = trace ("Comparing " ++ (show $ TP.pretty TP.Never t1  ) ++ " 
   (TermN Nothing t1, TermN Nothing t2) -> trace "TERM NOTHING BASE CASE" $  (type1Equal t1 t2)
   _ -> False
 
-isInfiniteLit p = case p of
+isInfiniteLit :: P.CanonicalPattern -> Bool
+isInfiniteLit (A.A _ p) = case p of
   P.Literal (Literal.IntNum _) -> True
   P.Literal (Literal.Str _) -> True
   P.Literal (Literal.Chr _) -> True --We assume chars may be infinite, in the case of Unicode
@@ -330,17 +336,23 @@ checkIfTotal env rawPatList = trace ("\n\n\n\n\nCHECK IF TOTAL!!!\n" ++ show raw
 --Very Boring, constraint rules for literal patterns
 --Constrain just like expression literals, but we don't leave the possible set of values open
 --This is for cases where we match against a literal and know its exact value
+constrainLiteral
+  :: Environment
+  -> R.Region
+  -> Literal.Literal
+  -> Type
+  -> ErrorT (R.Region -> PP.Doc) IO TypeConstraint
 constrainLiteral env region lit tipe =
   let
-    t1 === t2 = A.A region (CEqual t1 t2)
+    t1 === t2 = (CEqual RErr.None region t1 t2)
   in case lit of
         (Literal.IntNum n) -> 
           return $ tipe === closedAnnot [("_" ++ show n, [])] 
         (Literal.FloatNum f) -> 
-          return $ tipe === closedAnnot [("_" ++ show f, [])] 
+          return _ -- $ tipe === closedAnnot [("_" ++ show f, [])] 
         (Literal.Chr u) -> 
-          return $ tipe === closedAnnot [("_" ++ show u, [])] 
+          return _ -- $ tipe === closedAnnot [("_" ++ show u, [])] 
         (Literal.Str s) -> 
-          return $ tipe === closedAnnot [("_" ++ show s, [])] 
+          return _ -- $ tipe === closedAnnot [("_" ++ show s, [])] 
         (Literal.Boolean b) -> 
-          return $ tipe === closedAnnot [("_" ++ show b, [])] 
+          return _ -- $ tipe === closedAnnot [("_" ++ show b, [])] 
