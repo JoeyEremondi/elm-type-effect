@@ -44,10 +44,12 @@ compile user projectName interfaces source =
       canonicalModule <- Canonical.module' interfaces rawModule
 
       -- Run type inference on the program.
-      types <- TI.infer interfaces canonicalModule
+      (types, annots) <- TI.infer interfaces canonicalModule
 
       -- Add the real list of tyes
-      let body = (Module.body canonicalModule) { Module.types = types }
+      let body =
+            (Module.body canonicalModule) { Module.types = types,
+                                            Module.annots = annots}
 
       return $ canonicalModule { Module.body = body }
 

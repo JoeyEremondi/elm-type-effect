@@ -16,10 +16,13 @@ import Type.Type
 import Type.PrettyPrint
 import qualified Type.Hint as Hint
 import Elm.Utils ((|>))
+--import Debug.Trace (trace)
+
+trace _ x = x
 
 
 unify :: A.Region -> Variable -> Variable -> StateT TS.SolverState IO ()
-unify region variable1 variable2 =
+unify region variable1 variable2 = 
   do  result <- runErrorT (unifyHelp region variable1 variable2)
       either TS.addHint return result
 
@@ -35,7 +38,7 @@ typeError
     -> UF.Point Descriptor
     -> UF.Point Descriptor
     -> Unify a
-typeError region hint t1 t2 =
+typeError region hint t1 t2 = 
   do  msg <- liftIO (Hint.create region hint t1 t2)
       throwError msg
 
@@ -54,7 +57,10 @@ actuallyUnify region variable1 variable2 = do
   desc2 <- liftIO $ UF.descriptor variable2
   let unifyHelp' = unifyHelp region
 
-      (name', flex', rank', alias') = combinedDescriptors desc1 desc2
+      (name', flex', rank', alias') =
+        let
+          ret = combinedDescriptors desc1 desc2
+        in ret
 
       merge1 :: Unify ()
       merge1 = liftIO $ do
@@ -81,7 +87,7 @@ actuallyUnify region variable1 variable2 = do
       merge = if rank desc1 < rank desc2 then merge1 else merge2
 
       fresh :: Maybe (Term1 Variable) -> Unify Variable
-      fresh structure = do
+      fresh structure =  do
         v <- liftIO . UF.fresh $ Descriptor
              { structure = structure
              , rank = rank'
@@ -97,7 +103,7 @@ actuallyUnify region variable1 variable2 = do
         liftIO $ UF.modifyDescriptor v $ \desc -> desc { flex = Flexible }
         unifyHelp' variable1 variable2
 
-      unifyNumber svar (Var.Canonical home name) =
+      unifyNumber svar (Var.Canonical home name) =  
           case home of
             Var.BuiltIn | name `elem` ["Int","Float"]   -> flexAndUnify svar
             Var.Local   | List.isPrefixOf "number" name -> flexAndUnify svar
@@ -106,27 +112,27 @@ actuallyUnify region variable1 variable2 = do
               in
                   typeError region (Just hint) variable1 variable2
 
-      comparableError maybe =
+      comparableError maybe =  
           typeError region (Just $ Maybe.fromMaybe msg maybe) variable1 variable2
         where
           msg =
             "Looks like you want something comparable, but the only valid comparable\n\
             \types are Int, Float, Char, String, lists, or tuples."
 
-      appendableError maybe =
+      appendableError maybe =  
           typeError region (Just $ Maybe.fromMaybe msg maybe) variable1 variable2
         where
           msg =
             "Looks like you want something appendable, but the only Strings, Lists,\n\
             \and Text can be appended with the (++) operator."
 
-      unifyComparable v (Var.Canonical home name) =
+      unifyComparable v (Var.Canonical home name) =  
           case home of
             Var.BuiltIn | name `elem` ["Int","Float","Char","String"] -> flexAndUnify v
             Var.Local   | List.isPrefixOf "comparable" name           -> flexAndUnify v
             _ -> comparableError Nothing
 
-      unifyComparableStructure varSuper varFlex =
+      unifyComparableStructure varSuper varFlex =  
           do struct <- liftIO $ collectApps varFlex
              case struct of
                Other -> comparableError Nothing
@@ -140,13 +146,13 @@ actuallyUnify region variable1 variable2 = do
                           cmpVars <- liftIO $ forM [1..length vs] $ \_ -> variable (Is Comparable)
                           zipWithM_ unifyHelp' vs cmpVars
 
-      unifyAppendable varSuper varFlex =
+      unifyAppendable varSuper varFlex =  
           do struct <- liftIO $ collectApps varFlex
              case struct of
                List _ -> flexAndUnify varSuper
                _      -> appendableError Nothing
 
-      rigidError var =
+      rigidError var =  
           typeError region (Just hint) variable1 variable2
         where
           hint =
@@ -154,7 +160,7 @@ actuallyUnify region variable1 variable2 = do
             "The problem probably relates to the type variable being shared between a\n\
             \top-level type annotation and a related let-bound type annotation."
 
-      superUnify =
+      superUnify =  
           case (flex desc1, flex desc2, name desc1, name desc2) of
             (Is super1, Is super2, _, _)
                 | super1 == super2 -> merge
@@ -191,7 +197,7 @@ actuallyUnify region variable1 variable2 = do
     (Nothing, _) -> superUnify
     (_, Nothing) -> superUnify
 
-    (Just type1, Just type2) ->
+    (Just type1, Just type2) -> trace ("Unifying " ++ show (pretty Never type1) ++ " " ++ show (pretty Never type2) ++ "\n" ++ show region) $ 
         case (type1,type2) of
           (App1 term1 term2, App1 term1' term2') ->
               do merge
@@ -222,7 +228,7 @@ recordUnify
     -> Variable
     -> Variable
     -> Unify ()
-recordUnify region fresh variable1 variable2 =
+recordUnify region fresh variable1 variable2 = trace ("REC Unifying records " ++ (show $ pretty App variable1) ++ (show $ pretty App variable2) ) $
   do  (ExpandedRecord fields1 ext1) <- liftIO (gatherFields variable1)
       (ExpandedRecord fields2 ext2) <- liftIO (gatherFields variable2)
 
@@ -243,11 +249,11 @@ recordUnify region fresh variable1 variable2 =
         (Empty _, Empty _) ->
             case Map.null uniqueFields1 && Map.null uniqueFields2 of
               True -> return ()
-              False -> typeError region Nothing variable1 variable2
+              False -> trace "RecErr1" $ typeError region Nothing variable1 variable2
 
         (Empty var1, Extension var2) ->
             case (Map.null uniqueFields1, Map.null uniqueFields2) of
-              (_, False) -> addFieldMismatchError uniqueFields2
+              (_, False) -> trace ("RecErr2 " ++ show (Map.keys uniqueFields2)) $ addFieldMismatchError uniqueFields2
               (True, True) -> unifyHelp region var1 var2
               (False, True) ->
                 do  subRecord <- freshRecord uniqueFields1 var1
@@ -255,7 +261,7 @@ recordUnify region fresh variable1 variable2 =
 
         (Extension var1, Empty var2) ->
             case (Map.null uniqueFields1, Map.null uniqueFields2) of
-              (False, _) -> addFieldMismatchError uniqueFields1
+              (False, _) -> trace "RecErr3" $ addFieldMismatchError uniqueFields1
               (True, True) -> unifyHelp region var1 var2
               (True, False) ->
                 do  subRecord <- freshRecord uniqueFields2 var2
@@ -286,7 +292,7 @@ unifyOverlappingFields
     -> Map.Map String [Variable]
     -> Map.Map String [Variable]
     -> Unify ()
-unifyOverlappingFields region fields1 fields2 =
+unifyOverlappingFields region fields1 fields2 =  
     Map.intersectionWith (zipWith (unifyHelp region)) fields1 fields2
         |> Map.elems 
         |> concat
@@ -294,7 +300,7 @@ unifyOverlappingFields region fields1 fields2 =
 
 
 diffFields :: Map.Map String [a] -> Map.Map String [a] -> Map.Map String [a]
-diffFields fields1 fields2 =
+diffFields fields1 fields2 = 
   let eat (_:xs) (_:ys) = eat xs ys
       eat xs _ = xs
   in
@@ -311,7 +317,7 @@ data Extension = Empty Variable | Extension Variable
 
 
 gatherFields :: Variable -> IO ExpandedRecord
-gatherFields var =
+gatherFields var =  
   do  desc <- UF.descriptor var
       case structure desc of
         (Just (Record1 fields ext)) ->
@@ -327,7 +333,7 @@ gatherFields var =
 
 -- assumes that one of the dicts has stuff in it
 fieldMismatchError :: Map.Map String a -> String
-fieldMismatchError missingFields =
+fieldMismatchError missingFields =  
     case Map.keys missingFields of
       [] -> ""
       [key] ->
@@ -340,11 +346,11 @@ fieldMismatchError missingFields =
 
 combinedDescriptors :: Descriptor -> Descriptor
                     -> (Maybe Var.Canonical, Flex, Int, Maybe Var.Canonical)
-combinedDescriptors desc1 desc2 =
+combinedDescriptors desc1 desc2 = 
     (name', flex', rank', alias')
   where
     rank' :: Int
-    rank' = min (rank desc1) (rank desc2)
+    rank' =  min (rank desc1) (rank desc2)
 
     alias' :: Maybe Var.Canonical
     alias' = alias desc1 <|> alias desc2

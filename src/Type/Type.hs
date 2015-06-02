@@ -16,6 +16,9 @@ import qualified AST.PrettyPrint as PP
 import qualified AST.Type as T
 import qualified AST.Variable as Var
 
+import System.CPUTime (getCPUTime)
+
+
 
 data Term1 a
     = App1 a a
@@ -23,11 +26,12 @@ data Term1 a
     | Var1 a
     | EmptyRecord1
     | Record1 (Map.Map String [a]) a
-
+    deriving (Show)
 
 data TermN a
     = VarN  (Maybe Var.Canonical) a
     | TermN (Maybe Var.Canonical) (Term1 (TermN a))
+    deriving (Show)
 
 
 varN :: a -> TermN a
@@ -83,6 +87,25 @@ monoscheme :: Map.Map String a -> Scheme a b
 monoscheme headers = Scheme [] [] (noneNoDocs CTrue) headers
 
 
+showType :: Type -> String
+showType t = case t of
+  --(VarN Nothing ty2) -> "?" ++ (show $ mark $ unsafePerformIO $ UF.descriptor ty2) ++ "&"
+  --(VarN (Just ty1) ty2) -> show $ Var.toString ty1
+  _ -> show $ pretty App t
+
+showVar t = show $ pretty App t
+
+showConstr :: TypeConstraint -> String
+
+showConstr (A _ con) = case con of
+  CTrue -> ""
+  CSaveEnv -> "SAVE_ENV"
+  (CEqual c1 c2) -> (showType c1 ) ++ " === " ++ (showType c2)
+  (CAnd conList) -> "\n****" ++ (List.intercalate "\n" $ map showConstr conList)
+  (CLet schemes c2) -> "Let {{" ++ (List.intercalate "\n" $ map showVar schemes) ++ "}}[[" ++ showConstr c2 ++ "]]"
+  (CInstance c1 c2) -> "INST " ++ c1 ++ " < " ++ showType c2
+
+
 infixl 8 /\
 
 (/\) :: Constraint a b -> Constraint a b -> Constraint a b
@@ -111,7 +134,7 @@ data Descriptor = Descriptor
     , copy :: Maybe Variable
     , mark :: Int
     , alias :: Maybe Var.Canonical
-    }
+    } 
 
 
 noRank :: Int
@@ -158,11 +181,13 @@ namedVar flex name = UF.fresh $ Descriptor
 
 
 variable :: Flex -> IO Variable
-variable flex = UF.fresh $ Descriptor
+variable flex = do
+ currentTime <- (\x -> (x `quot` 1000000) `mod` 1000)`fmap` getCPUTime
+ UF.fresh $ Descriptor
   { structure = Nothing
   , rank = noRank
   , flex = flex
-  , name = Nothing
+  , name = Nothing --Just (Var.Canonical Var.Local $ "?" ++ show currentTime)
   , copy = Nothing
   , mark = noMark
   , alias = Nothing
@@ -184,6 +209,11 @@ fl rqs constraint@(A ann _) =
 exists :: Error e => (Type -> ErrorT e IO TypeConstraint) -> ErrorT e IO TypeConstraint
 exists f =
   do  v <- liftIO $ variable Flexible
+      ex [v] <$> f (varN v)
+
+existsNamed :: Error e => String -> (Type -> ErrorT e IO TypeConstraint) -> ErrorT e IO TypeConstraint
+existsNamed nm f =
+  do  v <- liftIO $ namedVar Flexible (Var.Canonical Var.Local nm ) 
       ex [v] <$> f (varN v)
 
 
@@ -261,7 +291,7 @@ instance PrettyType Descriptor where
           | otherwise ->
               P.text (Var.toString name)
                             
-      _ -> P.text "?"
+      _ -> P.text ("[[?" ++ show (mark desc) ++ "]]")
 
 
 instance (PrettyType a, PrettyType b) => PrettyType (BasicConstraint a b) where
@@ -479,7 +509,7 @@ toSrcType var =
             return $ case ext' of
                        T.Record fs ext -> T.Record (fs ++ fields) ext
                        T.Var _ -> T.Record fields (Just ext')
-                       _ -> error "Used toSrcType on a type that is not well-formed"
+                       _ -> error $ "Used toSrcType on a type that is not well-formed" ++ show ext'
 
     dealias :: T.CanonicalType -> T.CanonicalType
     dealias t =

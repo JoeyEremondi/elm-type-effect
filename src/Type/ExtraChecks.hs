@@ -4,7 +4,7 @@
 successfully. At that point we still need to do occurs checks and ensure that
 `main` has an acceptable type.
 -}
-module Type.ExtraChecks (mainType, occurs, portTypes) where
+module Type.ExtraChecks (mainType, occurs, portTypes, toCanon) where
 
 import Control.Applicative ((<$>),(<*>))
 import Control.Monad.Error
@@ -29,6 +29,10 @@ throw :: [Doc] -> Either [Doc] a
 throw err =
   Left [ P.vcat err ]
 
+toCanon :: TS.Env -> ErrorT [P.Doc] IO (Map.Map String ST.CanonicalType)
+toCanon environment =
+  liftIO $ Traverse.traverse TT.toSrcType environment
+      
 
 mainType :: TS.Env -> ErrorT [P.Doc] IO (Map.Map String ST.CanonicalType)
 mainType environment =

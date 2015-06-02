@@ -20,7 +20,6 @@ import qualified Type.Environment as Env
 import qualified Type.Constrain.Literal as Literal
 import qualified Type.Constrain.Pattern as Pattern
 
-
 constrain
     :: Env.Environment
     -> Canonical.Expr
@@ -82,7 +81,7 @@ constrain env (A region expr) tipe =
           exists $ \t2 -> do
             fragment <- try region $ Pattern.constrain env p t1
             c2 <- constrain env e t2
-            let c = ex (vars fragment) (clet [monoscheme (typeEnv fragment)]
+            let c = ex (vars fragment) ( clet [monoscheme (typeEnv fragment)]
                                              (typeConstraint fragment /\ c2 ))
             return $ c /\ tipe === (t1 ==> t2)
 
@@ -108,7 +107,7 @@ constrain env (A region expr) tipe =
                   clet [toScheme fragment] <$> constrain env e tipe
             and . (:) ce <$> mapM branch branches
 
-      Data name exprs ->
+      Data name exprs -> 
           do vars <- forM exprs $ \_ -> liftIO (variable Flexible)
              let pairs = zip exprs (map varN vars)
              (ctipe, cs) <- Monad.foldM step (tipe,true) (reverse pairs)
@@ -161,8 +160,8 @@ constrain env (A region expr) tipe =
                  Monad.foldM (constrainDef env)
                              ([], [], [], Map.empty, true, true)
                              (concatMap expandPattern defs)
-             return $ clet schemes
-                           (clet [Scheme rqs fqs (clet [monoscheme header] c2) header ]
+             return $  clet schemes
+                            (clet [Scheme rqs fqs (clet [monoscheme header] c2) header ]
                                  (c1 /\ c))
 
       PortIn _ _ -> return true
