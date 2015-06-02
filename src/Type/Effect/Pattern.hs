@@ -16,10 +16,10 @@ import Control.Monad.Error
 import qualified Data.Map as Map
 import qualified Text.PrettyPrint as PP
 
-import qualified AST.Annotation as A
+import qualified Reporting.Annotation as A
 import qualified AST.Pattern as P
 import qualified AST.Variable as V
-import AST.PrettyPrint (pretty)
+import Reporting.PrettyPrint (pretty)
 import Type.Type
 import Type.Fragment
 import Type.Environment as Env

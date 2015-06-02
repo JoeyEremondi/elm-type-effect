@@ -170,6 +170,13 @@ monoscheme headers =
   Scheme [] [] CTrue headers
 
 
+
+showType :: Type -> String
+showType t = case t of
+  --(VarN Nothing ty2) -> "?" ++ (show $ mark $ unsafePerformIO $ UF.descriptor ty2) ++ "&"
+  --(VarN (Just ty1) ty2) -> show $ Var.toString ty1
+  _ -> show $ pretty App t
+
 infixl 8 /\
 
 (/\) :: Constraint a b -> Constraint a b -> Constraint a b

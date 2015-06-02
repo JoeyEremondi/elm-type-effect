@@ -17,12 +17,12 @@ import qualified Data.Map as Map
 import qualified Text.PrettyPrint as PP
 
 import AST.Literal as Lit
-import AST.Annotation as Ann
+import Reporting.Annotation as Ann
 import AST.Expression.General
 import qualified AST.Expression.Canonical as Canonical
 import qualified AST.Pattern as P
-import AST.PrettyPrint (pretty)
-import qualified Type.PrettyPrint as TP
+import Reporting.PrettyPrint (pretty)
+import qualified Reporting.PrettyPrint as TP
 import qualified AST.Type as ST
 import qualified AST.Variable as V
 import Type.Type hiding (Descriptor(..))
