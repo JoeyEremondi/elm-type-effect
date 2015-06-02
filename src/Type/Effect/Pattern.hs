@@ -44,8 +44,9 @@ trace _ x = x
 --By patterns, as well as constraints on them
 constrain :: Environment -> P.CanonicalPattern -> Type
           -> ErrorT (R.Region -> PP.Doc) IO Fragment
-constrain env (A.A _ pattern) tipe = 
-    let region = _ --A.None (pretty pattern)
+constrain env (A.A _ pattern) tipe =
+    --TODO what is sensible default for here?
+    let region = R.Region (R.Position 0 0 ) (R.Position 0 0 ) --_ --A.None (pretty pattern)
         newVar = varN `fmap` (liftIO $ variable Flexible)
         t1 === t2 = CEqual RErr.None region t1 t2
         --genSubTypeConstr :: Type -> [P.CanonicalPattern] -> Int -> TypeConstraint -> TypeConstraint
@@ -73,7 +74,7 @@ constrain env (A.A _ pattern) tipe =
                       --exists $ \fieldAnnot -> do
                         let constr = typeConstraint frag 
                         
-                        let ourFieldConstr = _ --ty === (directRecord [("_sub" ++ show n, fieldAnnot)] restOfRec)
+                        let ourFieldConstr = ty === (directRecord [("_sub" ++ show n, fieldAnnot)] restOfRec)
                         return $ constr /\ ourFieldConstr
                   let newFrag = joinFragments [frag, ourFieldFrag {typeConstraint = newConstr}]
                   genSubTypeConstr ty rest (n+1) newFrag 
@@ -91,7 +92,7 @@ constrain env (A.A _ pattern) tipe =
       P.Var name -> do
           v <- liftIO $ variable Flexible
           return $ Fragment {
-              typeEnv    = Map.singleton name ( _ {-varN v-}),
+              typeEnv    = Map.singleton name ( A.A region (varN v)),
               vars       = [v],
               typeConstraint = varN v === tipe
           }
@@ -104,7 +105,7 @@ constrain env (A.A _ pattern) tipe =
           fragment <- constrain env p tipe
           --TODO this case? Constrain alias?
           return $ fragment
-            { typeEnv = Map.insert name _ {-varType-} (typeEnv fragment)
+            { typeEnv = Map.insert name (A.A region varType) (typeEnv fragment)
             , vars    = v : vars fragment
             , typeConstraint = varType === tipe /\ typeConstraint fragment
             }
@@ -139,10 +140,10 @@ constrain env (A.A _ pattern) tipe =
       --Record : just map each sub-pattern into fields of a record
       P.Record fields -> do
           pairs <- liftIO $ mapM (\name -> (,) name <$> variable Flexible) fields
-          let tenv = Map.fromList (map (second varN) pairs)
+          let tenv = Map.fromList (map ( (second varN)) pairs)
           c <- liftIO $ exists $ \t -> return (tipe === record (Map.map (:[]) tenv) t)
           return $ Fragment {
-              typeEnv        = _, -- tenv,
+              typeEnv        = Map.map (A.A region ) tenv,
               vars           = map snd pairs,
               typeConstraint = c
           }
@@ -230,9 +231,9 @@ fieldSubset f1 f2 =
 
 --Generate the annotation of all patterns which can be matched
 --By the given list of patterns
-typeForPatList
-  :: Environment -> R.Region -> [P.CanonicalPattern]
-    -> ErrorT [PP.Doc] IO Type
+--typeForPatList
+--  :: Environment -> R.Region -> [P.CanonicalPattern]
+--    -> ErrorT [PP.Doc] IO Type
 typeForPatList env region patList = do
   isTotal <- checkIfTotal env patList
   if isTotal
@@ -268,12 +269,12 @@ type1Equal t1 t2 = case (t1, t2) of
 --Equality check for types, used for sorting through environments and getting constructor types
 typeNEqual :: Type -> Type -> Bool
 typeNEqual t1 t2 = trace ("Comparing " ++ (show $ TP.pretty TP.Never t1  ) ++ " and " ++ ((show $ TP.pretty TP.Never t2  ) ) ) $ case (t1, t2) of
-  (VarN (Just n1) _, VarN (Just n2) _) -> trace "VAR JUST BASE CASE" $ n1 == n2
+  (VarN (Just n1) _, VarN (Just n2) _) -> (fst n1) == (fst n2) --trace "VAR JUST BASE CASE" $ n1 == n2
   (VarN Nothing t1a, VarN Nothing t2a) -> let
       desc1 = unsafePerformIO $ UF.descriptor t1a
       desc2 = unsafePerformIO $ UF.descriptor t2a
     in  trace ("DESCRIPTOR CASE " ++ (show $ name desc1) ++ "   " ++ show (name desc2 )) $ (name desc1 == name desc2)
-  (TermN (Just n1) t1, TermN (Just n2) t2) -> trace "TERM JUST BASE CASE" $ (n1 == n2) && (type1Equal t1 t2)
+  (TermN (Just n1) t1, TermN (Just n2) t2) -> trace "TERM JUST BASE CASE" $ (fst n1 == fst n2) && (type1Equal t1 t2)
   (TermN Nothing t1, TermN Nothing t2) -> trace "TERM NOTHING BASE CASE" $  (type1Equal t1 t2)
   _ -> False
 
@@ -289,10 +290,10 @@ isInfiniteLit (A.A _ p) = case p of
 --This is used to ensure that complete pattern matches can match against Top,
 --Even in the case where no wildcard is present
 --Since integers have no constructors (only literals), this will never succeed for integers
-checkIfTotal
-  :: Environment
-  -> [P.CanonicalPattern]
-  -> ErrorT [PP.Doc] IO Bool
+--checkIfTotal
+--  :: Environment
+--  -> [P.CanonicalPattern]
+--  -> ErrorT [PP.Doc] IO Bool
 checkIfTotal env rawPatList = trace ("\n\n\n\n\nCHECK IF TOTAL!!!\n" ++ show rawPatList) $ do
   --An integer or string match will never be total
   --TODO bools and such?
@@ -349,10 +350,10 @@ constrainLiteral env region lit tipe =
         (Literal.IntNum n) -> 
           return $ tipe === closedAnnot [("_" ++ show n, [])] 
         (Literal.FloatNum f) -> 
-          return _ -- $ tipe === closedAnnot [("_" ++ show f, [])] 
+          return $ tipe === closedAnnot [("_" ++ show f, [])] 
         (Literal.Chr u) -> 
-          return _ -- $ tipe === closedAnnot [("_" ++ show u, [])] 
+          return  $ tipe === closedAnnot [("_" ++ show u, [])] 
         (Literal.Str s) -> 
-          return _ -- $ tipe === closedAnnot [("_" ++ show s, [])] 
+          return  $ tipe === closedAnnot [("_" ++ show s, [])] 
         (Literal.Boolean b) -> 
-          return _ -- $ tipe === closedAnnot [("_" ++ show b, [])] 
+          return  $ tipe === closedAnnot [("_" ++ show b, [])] 
