@@ -12,6 +12,7 @@ import qualified Parse.Parse as Parse
 import qualified Reporting.Error as Error
 import qualified Reporting.Result as Result
 import qualified Reporting.Report as Report
+import qualified Reporting.Region as Region
 import qualified Reporting.Warning as Warning
 import qualified Type.Inference as TI
 import qualified Type.Annotate as TA
@@ -52,7 +53,9 @@ compile user projectName isRoot interfaces source =
             TA.checkTotality interfaces canonicalModule
       --Apply each warning
       forM warnings (\ (reg, warning) ->
-                       trace ("\n" ++ (show reg) ++ "\n" ++ (Report.toString "" reg (Warning.toReport Map.empty warning) "") ++ "\n" ) $
+                       trace ("\n" ++ "Line " ++ (show $ Region.line $ Region.start reg)
+                              ++ ", col " ++ (show $ Region.column $ Region.start reg) ++ "\n"
+                              ++ (Report.toString "" reg (Warning.toReport Map.empty warning) "") ++ "\n" ) $
                        Result.warn reg warning)
 
       -- One last round of checks
