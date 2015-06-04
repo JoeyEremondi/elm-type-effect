@@ -1,4 +1,4 @@
-module Type.Solve (solve) where
+module Type.Solve (solve, solveToState) where
 
 import Control.Applicative ((<$>), (<*>), (<|>))
 import Control.Monad
@@ -16,6 +16,8 @@ import qualified Reporting.Error.Type as Error
 import qualified Type.State as TS
 import Type.Type
 import Type.Unify
+
+import Debug.Trace (trace)
 
 
 {-| Every variable has rank less than or equal to the maxRank of the pool.
@@ -125,6 +127,8 @@ solve constraint =
         errors ->
             throwError errors
 
+solveToState :: TypeConstraint -> IO TS.SolverState
+solveToState constraint = (execStateT (actuallySolve constraint) TS.initialState)
 
 actuallySolve :: TypeConstraint -> StateT TS.SolverState IO ()
 actuallySolve constraint =
@@ -167,7 +171,7 @@ actuallySolve constraint =
                   Nothing ->
                       if List.isPrefixOf "Native." name
                         then liftIO (variable Flexible)
-                        else error ("Could not find '" ++ name ++ "' when solving type constraints.")
+                        else trace ("\nEnv " ++ (show (Map.keys env) ) ++ "\n" ) $ error ("Could not find '" ++ name ++ "' when solving type constraints.")
 
             t <- TS.flatten term
             unify Error.None region freshCopy t

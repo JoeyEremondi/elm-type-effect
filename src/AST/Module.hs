@@ -66,6 +66,7 @@ data Module imports exports body = Module
 data CanonicalBody = CanonicalBody
     { program   :: Canonical.Expr
     , types     :: Types
+    , annots    :: Types 
     , fixities  :: [(Decl.Assoc, Int, String)]
     , aliases   :: Aliases
     , datatypes :: ADTs
@@ -119,6 +120,7 @@ data Interface = Interface
     { iVersion  :: String
     , iExports  :: [Var.Value]
     , iTypes    :: Types
+    , iAnnots   :: Types
     , iImports  :: [Name]
     , iAdts     :: ADTs
     , iAliases  :: Aliases
@@ -133,6 +135,7 @@ toInterface modul =
     { iVersion  = Compiler.version
     , iExports  = exports modul
     , iTypes    = types body'
+    , iAnnots   = annots body'
     , iImports  = imports modul
     , iAdts     = datatypes body'
     , iAliases  = aliases body'
@@ -141,11 +144,12 @@ toInterface modul =
     }
 
 instance Binary Interface where
-  get = Interface <$> get <*> get <*> get <*> get <*> get <*> get <*> get <*> get
+  get = Interface <$> get <*> get <*> get <*> get <*> get <*> get <*> get <*> get <*> get
   put modul = do
       put (iVersion modul)
       put (iExports modul)
       put (iTypes modul)
+      put (iAnnots modul)
       put (iImports modul)
       put (iAdts modul)
       put (iAliases modul)

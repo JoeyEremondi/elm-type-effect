@@ -13,13 +13,15 @@ import qualified Reporting.Annotation as A
 import qualified Reporting.PrettyPrint as P
 import qualified Reporting.Report as Report
 
+import qualified Data.List as List
+
 
 -- ALL POSSIBLE WARNINGS
 
 data Warning
     = UnusedImport Module.Name
     | MissingTypeAnnotation String Type.Canonical
-
+    | MissingCase Type.Canonical Type.Canonical
 
 -- TO STRING
 
@@ -33,9 +35,30 @@ print dealiaser location source (A.A region warning) =
     Report.printWarning location region (toReport dealiaser warning) source
 
 
+findMissingCases :: P.Dealiaser -> Type.Canonical -> Type.Canonical -> String
+findMissingCases dealiaser t1 t2 = case (t1, t2) of
+   (Type.Record fields1 _, Type.Record fields2 _) ->
+     List.intercalate ", " $  [ (tail s) | (s, _) <- fields1, not (s `elem` (map fst fields2) ) ]
+   _ -> "ERROR: Bug in Exhaustiveness checker"
+
+typeToMatchedCases dealiaser (Type.Record fields _) = List.intercalate ", " (map (tail . fst) fields)
+
+needsTop t = case t of
+  Type.Record fields _ -> not $ null $ filter (\(x,_) -> x == "__Top" || x == "Lambda") fields
+  _ -> False
+
 toReport :: P.Dealiaser -> Warning -> Report.Report
 toReport dealiaser warning =
   case warning of
+    MissingCase t1 t2 ->
+      if needsTop t1
+      then Report.simple "unmatched pattern" "Function matching a finite number of patterns given an argument with possibly infinite values. (This is likely from matching on Integer or String literals)." "Try writing a wildcard '_' case for your function."
+      else
+        Report.simple
+          "unmatched pattern"
+          ("Possible argument constructors not matched in the given function: "
+           ++ findMissingCases dealiaser t1 t2)
+          ("Matched patterns: " ++ typeToMatchedCases dealiaser t2)
     UnusedImport moduleName ->
         Report.simple
           "unused import"

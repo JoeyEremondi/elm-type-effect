@@ -106,6 +106,7 @@ Library
         Type.Environment,
         Type.Fragment,
         Type.Inference,
+        Type.Annotate,
         Type.PrettyPrint,
         Type.Solve,
         Type.State,

@@ -101,7 +101,7 @@ poisonJoin2 comp = case (reverseComparison LT) of
   GT -> 3
 
 --This one obviously should not succeed
-badJoin 1 = case (reverseComparison LT) of
+badJoin1 = case (reverseComparison LT) of
   LT -> 3
 
 

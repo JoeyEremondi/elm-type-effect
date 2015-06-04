@@ -18,6 +18,14 @@ import qualified Reporting.Error.Type as Error
 import qualified Reporting.Region as R
 import Type.PrettyPrint
 
+import qualified Data.List as List
+
+import Debug.Trace
+
+myTailT l = case l of
+  [] -> error "TY TAIL"
+  _ -> List.tail l
+
 
 -- CONCRETE TYPES
 
@@ -565,7 +573,7 @@ createName desc =
 
     _ ->
         do  names <- State.gets freeNames
-            State.modify (\state -> state { freeNames = tail names })
+            State.modify (\state -> state { freeNames = myTailT names })
             return (head names)
 
 

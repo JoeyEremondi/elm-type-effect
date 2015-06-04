@@ -216,13 +216,13 @@ constrain env (A region expr) tipe =
                     --let recType = _
                     fragment <- Pattern.constrain  env p patType --texp
                     letConstr <- clet [toScheme fragment] <$> constrain env e retAnnot 
-                    return $ letConstr -- /\ retAnnot === tipe
+                    return $ letConstr  /\ retAnnot === tipe --TODO remove?
             resultConstr <- and . (:) ce <$> mapM branchConstraints branches
             --We can get infinite types if we try to combine our branches
             --So we always assume we return top
             --TODO better solution?
-            isTopConstr <- isTop tipe
-            return $ canMatchConstr /\ resultConstr /\ isTopConstr --TODO more precise?
+            --isTopConstr <- isTop tipe
+            return $ canMatchConstr /\ resultConstr -- /\ isTopConstr --TODO more precise?
 
 
       --A Constructor has a function type, accepting any argument

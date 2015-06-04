@@ -26,6 +26,10 @@ import qualified Reporting.Annotation as A
 import qualified Reporting.Region as R
 
 
+myTail l = case l of
+  [] -> error "GEN TAIL"
+  _ -> List.tail l
+
 internalImports :: Module.Name -> [VarDecl ()]
 internalImports name =
     [ varDecl "_N" (obj ["Elm","Native"])
@@ -110,7 +114,7 @@ expression (A.A region expr) =
 
             hidden fs =
                 ObjectLit () . map (prop *** ArrayLit ()) $
-                  Map.toList (Map.filter (not . null) (Map.map tail fs))
+                  Map.toList (Map.filter (not . null) (Map.map myTail fs))
 
             visible fs =
                 map (first prop) (Map.toList (Map.map head fs))

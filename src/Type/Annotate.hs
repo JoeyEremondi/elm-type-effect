@@ -10,6 +10,7 @@ import qualified AST.Type as Type
 import qualified AST.Variable as Var
 import qualified Reporting.Annotation as A
 import qualified Reporting.Error.Type as Error
+import qualified Reporting.Warning as Warning
 import qualified Type.Constrain.Expression as TcExpr
 import qualified Type.Environment as Env
 import qualified Type.Solve as Solve
@@ -22,6 +23,7 @@ import qualified Type.Effect.Expression as EfExpr
 import Text.PrettyPrint
 
 import Reporting.Report as Report
+import Reporting.Region as Region
 
 import System.IO.Unsafe
     -- Maybe possible to switch over to ST instead of IO.
@@ -30,39 +32,48 @@ import System.IO.Unsafe
 import Debug.Trace (trace)
 
 import Type.Inference
+import Type.PrettyPrint
 
 
-
-
+showVar t = show $ pretty App t
 
 
 
 errToString (A.A reg p) = Report.toString "" reg (Error.toReport (Map.empty) p) ""
 
+
+
+--showConstr :: TypeConstraint -> String
+showConstr con = case con of
+  T.CTrue -> ""
+  T.CSaveEnv -> "SAVE_ENV"
+  (T.CEqual _ _  c1 c2) -> (T.showType c1 ) ++ " === " ++ (T.showType c2)
+  (T.CAnd conList) -> "\n****" ++ (List.intercalate "\n" $ map showConstr conList)
+  (T.CLet schemes c2) -> "Let {{" ++ (List.intercalate "\n" $ map showVar schemes) ++ "}}[[" ++ showConstr c2 ++ "]]"
+  (T.CInstance _ c1 c2) -> "INST " ++ c1 ++ " < " ++ T.showType c2
 ------------------runExceptT
 --Added for APA Project 2
 ------------------
 checkTotality
     :: Interfaces
     -> CanonicalModule
-    -> Except [A.Located Error.Error] (Map.Map String Type.Canonical)
+    -> ([(Region.Region, Warning.Warning)], Map.Map String Type.Canonical)
 checkTotality interfaces modul =
-  either throwError return $ unsafePerformIO $ runExceptT $
-    do  (header, constraint) <-
+    unsafePerformIO $ do
+        (header, constraint) <-
             liftIO (genTotalityConstraints interfaces modul)
-        state <- Solve.solve constraint
-        --TODO incorporate into Warning system
-        let warnings = List.map (\ (A.A reg p) -> Report.toString "" reg (Error.toReport (Map.empty) p) "" ) $ TS.sError state
-        case (trace ("Found warnings " ++ show (length warnings )) $ warnings) of
-                errorMsgs@(_:_) -> liftIO
-                                  $ mapM_
-                                  (\p -> putStrLn ("WARNING: " ++ p)) errorMsgs
-                []          -> return ()
+        state <-  Solve.solveToState constraint
+        let warnings = List.foldr (\ (A.A reg p) soFar ->
+                                  case p of
+                                    Error.Mismatch m -> [(reg, missingCaseWarning m)] ++ soFar
+                                    _ -> soFar) [] (TS.sError state)
 
         let header' = Map.delete "::" header
         let types = Map.map A.drop (Map.difference (TS.sSavedEnv state) header')
 
-        liftIO (Traverse.traverse T.toSrcType types)
+        retDict <- liftIO (Traverse.traverse T.toSrcType types)
+        return $ trace (show retDict ) $ (warnings, retDict)
+          
     --do  (header, constraint) <- genTotalityConstraints interfaces modul
 
 
@@ -116,3 +127,6 @@ canonicalizeAnnots env (moduleName, iface) =
     forM (Map.toList (iAnnots iface)) $ \(name,tipe) ->
         do  tipe' <- Env.instantiateType env tipe Map.empty
             return (Module.nameToString moduleName ++ "." ++ name, tipe')
+
+missingCaseWarning :: Error.Mismatch ->  Warning.Warning
+missingCaseWarning err = Warning.MissingCase (Error._leftType err ) (Error._rightType err )

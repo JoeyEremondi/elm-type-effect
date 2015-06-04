@@ -95,6 +95,8 @@ moduleHelp interfaces modul@(Module.Module _ _ exports _ decls) =
 
           , types =
               Map.empty
+          , annots =
+              Map.empty
 
           , datatypes =
               Map.fromList [ (name,(vars,ctors)) | D.Datatype name vars ctors <- nakedDecls ]

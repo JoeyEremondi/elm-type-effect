@@ -191,7 +191,7 @@ sortByCtor patList =
       (P.Literal e) -> subPatList
     sortedPats = [ (ctor, List.transpose $ foldr (maybeAddName ctor) [] patList) | ctor <- allNames]
       
-  in sortedPats
+  in trace ("ALL NAMES " ++ show allNames ) $ sortedPats
 
 --Check if a pattern can match any expression
 --Basically check for a variable or underscore
@@ -285,6 +285,12 @@ isInfiniteLit (A.A _ p) = case p of
   P.Literal (Literal.Chr _) -> True --We assume chars may be infinite, in the case of Unicode
   _ -> False
 
+removeUnderscore :: String -> String
+removeUnderscore s = case s of
+  [] -> []
+  ('_' : s2) -> s2
+  _ -> s
+
 --Given a list of patterns, determine if the pattern can match
 --any possible value of its type
 --This is used to ensure that complete pattern matches can match against Top,
@@ -294,25 +300,29 @@ isInfiniteLit (A.A _ p) = case p of
 --  :: Environment
 --  -> [P.CanonicalPattern]
 --  -> ErrorT [PP.Doc] IO Bool
+--Special case: only ever 1 option for pattern matching on a record
+--So it doesn't play into our totality calculations
+checkIfTotal _ [A.A _ (P.Record _)] = return True
 checkIfTotal env rawPatList = trace ("\n\n\n\n\nCHECK IF TOTAL!!!\n" ++ show rawPatList) $ do
   --An integer or string match will never be total
   --TODO bools and such?
   let patList = filter (not . isInfiniteLit) rawPatList
   let hasWildcard = (any containsWildcard patList)
-  let sortedPats = sortByCtor patList
+  let sortedPats = trace ("PAT LIST LENGTH " ++ show (length patList) ) $ sortByCtor patList
   let mapGet d k = case Map.lookup k d of
         Nothing -> error $ "Key " ++ show k ++ " not in " ++ show (Map.keys d)
         Just x -> x
   case (patList,hasWildcard) of
-    ([], _) -> return False
+    
     (_, True) -> trace ("HAS WILDCARD " ++ show patList) $ return True
+    ([], _) -> return False
     (_,False) -> do
       --TODO pattern match on Bool?
       let allCtors = constructor env
       let ctorNames = Map.keys allCtors
       
       ctorValues <- mapM liftIO $ Map.elems allCtors
-      ourTypeInfo <- liftIO $ mapGet allCtors (tail $ fst $ head sortedPats) --remove underscore
+      ourTypeInfo <- liftIO $ mapGet allCtors (removeUnderscore $ trace ("PATLIST SHOW " ++ show patList) $  fst $ head sortedPats) --remove underscore
       let (_,_,_,ourType) = ourTypeInfo
       let
         ctorsForOurType =
