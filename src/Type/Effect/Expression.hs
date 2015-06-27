@@ -66,17 +66,14 @@ constrain
     -> IO (AnnConstraint PatInfo)
 constrain env (A region expr) tipe = do 
     let --list t = Env.get env Env.types "List" $ t
-        and = foldr ConstrAnd true
-        x /\ y = ConstrAnd x y
-        true = AnnTrue
-        t1 === t2 = (t1 `Contains` t2 ) /\ (t2 `Contains` t1)
+        
         --t1 ==> t2 = error "BAD LAMBDA TODO"--
          --We override this for our fn def
         --x <? t = (CInstance region x t)
         --clet schemes c = CLet schemes c
 
-        exists :: (Annot info -> IO (AnnConstraint info) ) -> IO (AnnConstraint info)
-        exists = existsWith _
+        exists :: (Annot PatInfo -> IO (AnnConstraint PatInfo) ) -> IO (AnnConstraint PatInfo)
+        exists = existsWith env
         
         --emptyRec = termN EmptyRecord1
         --bool = Env.get env Env.types "Bool"

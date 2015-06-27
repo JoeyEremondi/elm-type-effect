@@ -21,8 +21,8 @@ import qualified Reporting.Region as R
 import qualified AST.Pattern as P
 import qualified AST.Variable as V
 import Reporting.PrettyPrint (pretty)
-import Type.Type
-import Type.Fragment
+import qualified Type.Type as TT
+--import Type.Fragment
 import Type.Environment as Env
 import qualified AST.Literal as Literal
 import Type.Effect.Common
@@ -36,19 +36,23 @@ import qualified Type.PrettyPrint as TP
 import System.IO.Unsafe (unsafePerformIO)
 
 --import Debug.Trace (trace)
-trace _ x = x
+--trace _ x = x
 
 --Find the annotations that a variable matching a pattern must have
 --And return those constraints, along with the "fragment"
 --In the Elm type system, fragments contain new variables defined
 --By patterns, as well as constraints on them
-constrain :: Environment -> P.CanonicalPattern -> Type
-          -> IO Fragment
+constrain
+    :: PatAnnEnv
+    -> P.CanonicalPattern
+    -> PatAnn
+    -> IO PatFragment          
 constrain env (A.A _ pattern) tipe =
     --TODO what is sensible default for here?
     let region = R.Region (R.Position 0 0 ) (R.Position 0 0 ) --_ --A.None (pretty pattern)
-        newVar = varN `fmap` (liftIO $ variable Flexible)
-        t1 === t2 = CEqual RErr.None region t1 t2
+        exists = existsWith env
+        --newVar = varN `fmap` (liftIO $ variable Flexible)
+        --t1 === t2 = CEqual RErr.None region t1 t2
         --genSubTypeConstr :: Type -> [P.CanonicalPattern] -> Int -> TypeConstraint -> TypeConstraint
 
         --Helper function: given the sub-patterns of a pattern match
@@ -56,67 +60,67 @@ constrain env (A.A _ pattern) tipe =
         --With their precise values
         --Nothing fancy, really just looping over the patterns
         --And joining their fragments, recusively calling constrain on them
-        genSubTypeConstr :: Type -> [P.CanonicalPattern] -> Int -> Fragment -> IO Fragment
+        genSubTypeConstr :: PatAnn -> [P.CanonicalPattern] -> Int -> PatFragment -> IO PatFragment
         genSubTypeConstr ty patList num frag = do
           let thePatList :: [P.CanonicalPattern]
               thePatList = patList
           case patList of
                 [] -> return frag
                 (currentPat:rest) -> do
-                  fieldAnnot <- newVar
+                  fieldAnnot <- VarAnnot <$> newVar env
                   let
                           n :: Int
                           n = num
                   --TODO make this safe?
                   ourFieldFrag <- constrain env currentPat fieldAnnot
                   newConstr <-
-                      liftIO $ exists $ \restOfRec -> do
+                      exists $ \restOfRec -> do
                       --exists $ \fieldAnnot -> do
-                        let constr = typeConstraint frag 
+                        let constr = snd frag 
                         
-                        let ourFieldConstr = ty === (directRecord [("_sub" ++ show n, fieldAnnot)] restOfRec)
-                        return $ constr /\ ourFieldConstr
-                  let newFrag = joinFragments [frag, ourFieldFrag {typeConstraint = newConstr}]
+                        let ourFieldConstr = _ -- ty === (directRecord [("_sub" ++ show n, fieldAnnot)] restOfRec)
+                        return $ _ -- constr /\ ourFieldConstr
+                  let newFrag = _ --joinFragments [frag, ourFieldFrag {typeConstraint = newConstr}]
                   genSubTypeConstr ty rest (n+1) newFrag 
     in
     case pattern of
       --No constraints when we match anything, no variables either
-      P.Anything -> return emptyFragment
+      P.Anything -> return _ --emptyFragment
 
       --We know the exact value of a literal
       P.Literal lit -> do
-          c <- constrainLiteral env region lit tipe
-          return $ emptyFragment { typeConstraint = c }
+          c <- constrainLiteral env lit tipe
+          return $ _ -- emptyFragment { typeConstraint = c }
 
       --Variable: could have any annotations, so use a fresh typeVar
       P.Var name -> do
-          v <- liftIO $ variable Flexible
-          return $ Fragment {
-              typeEnv    = Map.singleton name ( A.A region (varN v)),
-              vars       = [v],
-              typeConstraint = varN v === tipe
-          }
+          v <- VarAnnot <$> newVar env
+          return $ _ --Fragment {
+              --typeEnv    = Map.singleton name ( A.A region (varN v)),
+              --vars       = [v],
+              --typeConstraint = varN v === tipe
+          --}
 
       --Alias: just add the name of the pattern to a fragment, then constrain the pattern
       --This is used for things like sort ((x,y) as pair) = if x < y then pair else (y,x)
       P.Alias name p -> do
-          v <- liftIO $ variable Flexible
-          let varType = varN v
+          varType <- VarAnnot <$> newVar env
           fragment <- constrain env p tipe
           --TODO this case? Constrain alias?
-          return $ fragment
-            { typeEnv = Map.insert name (A.A region varType) (typeEnv fragment)
-            , vars    = v : vars fragment
-            , typeConstraint = varType === tipe /\ typeConstraint fragment
-            }
+          return $ _ --fragment
+            --{ typeEnv = Map.insert name (A.A region varType) (typeEnv fragment)
+            -- , vars    = v : vars fragment
+            --, typeConstraint = varType === tipe /\ typeConstraint fragment
+            --}
 
       --Data: go into sub-patterns to extract their fragments
       --And constrain that the final result has the given constructor  
       P.Data name patterns -> do
           --TODO is this the right args?
-          (kind, cvars, args, result) <- liftIO $ freshDataScheme env (V.toString name)
-          argTypes <- liftIO $ mapM (\_ -> newVar) args
-          fragment <- Monad.liftM joinFragments (Monad.zipWithM (constrain env) patterns argTypes)
+          --(kind, cvars, args, result) <- liftIO $ freshDataScheme env (V.toString name)
+          args <- _
+          argTypes <- mapM (\_ -> newVar env) args
+          fragment <- _ --Monad.liftM _ (Monad.zipWithM (constrain env) patterns argTypes)
           --return fragment --TODO right?
           --We don't constrain at all here, since we already did the pattern match check
           --TODO let-expression for special cases?
@@ -125,7 +129,7 @@ constrain env (A.A _ pattern) tipe =
             liftIO $ exists $ \recordSubType ->
             exists $ \restOfRec -> do
              let ctorFieldConstr =
-                   tipe === directRecord [("_" ++ V.toString name, recordSubType )] restOfRec
+                   tipe === _ -- directRecord [("_" ++ V.toString name, recordSubType )] restOfRec
              
              argTypesFrag <- genSubTypeConstr recordSubType patterns 1 emptyFragment
              let argTypesConstr = typeConstraint argTypesFrag
@@ -133,15 +137,15 @@ constrain env (A.A _ pattern) tipe =
              --genSubTypeConstr tipe args 1 $ A.A region CTrue
             --return $ tipe === mkRecord [("_" ++ V.toString name, args )] restOfRec
           
-          return $ fragment {
-                typeConstraint = typeConstraint fragment /\ recordStructureConstr,
-                vars = cvars ++ vars fragment
-              }
+          return $ _ --fragment {
+                --typeConstraint = typeConstraint fragment /\ recordStructureConstr,
+                --vars = cvars ++ vars fragment
+              --}
       --Record : just map each sub-pattern into fields of a record
       P.Record fields -> do
-          pairs <- liftIO $ mapM (\name -> (,) name <$> variable Flexible) fields
-          let tenv = Map.fromList (map ( (second varN)) pairs)
-          c <- liftIO $ exists $ \t -> return (tipe === record (Map.map (:[]) tenv) t)
+          pairs <- _ --mapM (\name -> (,) name <$> variable Flexible) fields
+          let tenv = _ --Map.fromList (map ( (second varN)) pairs)
+          c <- exists $ \t -> return (tipe === _) --record (Map.map (:[]) tenv) t
           return $ Fragment {
               typeEnv        = Map.map (A.A region ) tenv,
               vars           = map snd pairs,
@@ -210,10 +214,10 @@ containsWildcard (A.A _ pat) =
 allMatchConstraints env argType region patList = do
   typeCanMatch <- typeForPatList env region patList
   return $ (argType === typeCanMatch)
-    where t1 === t2 = CEqual RErr.None region t1 t2
 
 
-fieldSubset :: (Map.Map String [Type]) -> (Map.Map String [Type]) -> Bool
+
+fieldSubset :: (Map.Map String [PatAnn]) -> (Map.Map String [PatAnn]) -> Bool
 fieldSubset f1 f2 =
   let
     names1 = Map.keys f1
@@ -237,15 +241,11 @@ fieldSubset f1 f2 =
 typeForPatList env region patList = do
   isTotal <- checkIfTotal env patList
   if isTotal
-     then trace ("IS TOTAL " ++ show patList) $ anyVar
+     then trace ("IS TOTAL " ++ show patList) $ _ --anyVar
      else trace ("NOT TOTAL") $ eachCtorHelper (sortByCtor patList)  
   where
-    anyVar = do
-      newVar <- liftIO $ variable Flexible
-      return $ varN newVar
     --indexFields = map (\i -> "_sub" ++ show i) ([1..] :: [Int])
-    true = A.A region CTrue
-    eachCtorHelper []  = return emptyRec
+    eachCtorHelper []  = return Empty
     eachCtorHelper ( (ctor, subPats ) : otherPats) =
       do
         subTypes <- mapM (typeForPatList env region) subPats
@@ -255,27 +255,27 @@ typeForPatList env region patList = do
 
 
 --Equality check for types, used for sorting through environments and getting constructor types
-type1Equal :: Term1 Type -> Term1 Type -> Bool
+type1Equal :: TT.Term1 TT.Type -> TT.Term1 TT.Type -> Bool
 type1Equal t1 t2 = case (t1, t2) of
-  (App1 t1a t1b, App1 t2a t2b) -> (typeNEqual t1a t2a) && (typeNEqual t1b t2b)
-  (Fun1 t1a t1b, App1 t2a t2b) -> (typeNEqual t1a t2a) && (typeNEqual t1b t2b)
-  (Var1 t1a, Var1 t2a) -> typeNEqual t1a t2a
-  (EmptyRecord1, EmptyRecord1) -> True
-  (Record1 fields1 t1b, Record1 fields2 t2b) ->
+  (TT.App1 t1a t1b, TT.App1 t2a t2b) -> (typeNEqual t1a t2a) && (typeNEqual t1b t2b)
+  (TT.Fun1 t1a t1b, TT.App1 t2a t2b) -> (typeNEqual t1a t2a) && (typeNEqual t1b t2b)
+  (TT.Var1 t1a, TT.Var1 t2a) -> typeNEqual t1a t2a
+  (TT.EmptyRecord1, TT.EmptyRecord1) -> True
+  (TT.Record1 fields1 t1b, TT.Record1 fields2 t2b) ->
     (fieldSubset fields1 fields2) && (fieldSubset fields2 fields1) && (typeNEqual t1b t2b)
   _ -> False
 
 --Check if two types are literally identical
 --Equality check for types, used for sorting through environments and getting constructor types
-typeNEqual :: Type -> Type -> Bool
+typeNEqual :: TT.Type -> TT.Type -> Bool
 typeNEqual t1 t2 = trace ("Comparing " ++ (show $ TP.pretty TP.Never t1  ) ++ " and " ++ ((show $ TP.pretty TP.Never t2  ) ) ) $ case (t1, t2) of
-  (VarN (Just n1) _, VarN (Just n2) _) -> (fst n1) == (fst n2) --trace "VAR JUST BASE CASE" $ n1 == n2
-  (VarN Nothing t1a, VarN Nothing t2a) -> let
+  (TT.VarN (Just n1) _, TT.VarN (Just n2) _) -> (fst n1) == (fst n2) --trace "VAR JUST BASE CASE" $ n1 == n2
+  (TT.VarN Nothing t1a, TT.VarN Nothing t2a) -> let
       desc1 = unsafePerformIO $ UF.descriptor t1a
       desc2 = unsafePerformIO $ UF.descriptor t2a
-    in  trace ("DESCRIPTOR CASE " ++ (show $ name desc1) ++ "   " ++ show (name desc2 )) $ (name desc1 == name desc2)
-  (TermN (Just n1) t1, TermN (Just n2) t2) -> trace "TERM JUST BASE CASE" $ (fst n1 == fst n2) && (type1Equal t1 t2)
-  (TermN Nothing t1, TermN Nothing t2) -> trace "TERM NOTHING BASE CASE" $  (type1Equal t1 t2)
+    in  trace ("DESCRIPTOR CASE " ++ (show $ TT.name desc1) ++ "   " ++ show (TT.name desc2 )) $ (TT.name desc1 == TT.name desc2)
+  (TT.TermN (Just n1) t1, TT.TermN (Just n2) t2) -> trace "TERM JUST BASE CASE" $ (fst n1 == fst n2) && (type1Equal t1 t2)
+  (TT.TermN Nothing t1, TT.TermN Nothing t2) -> trace "TERM NOTHING BASE CASE" $  (type1Equal t1 t2)
   _ -> False
 
 isInfiniteLit :: P.CanonicalPattern -> Bool
@@ -328,7 +328,7 @@ checkIfTotal env rawPatList = trace ("\n\n\n\n\nCHECK IF TOTAL!!!\n" ++ show raw
         ctorsForOurType =
                 filter (/= "_Tuple1") $
                 map fst $
-                filter (\(_, (_,_,_,tp)) -> trace ("ARE EQUAL? " ++ showType ourType ++ "   " ++ showType tp ++ (show $ typeNEqual tp ourType ) ) $ typeNEqual tp ourType) $ zip ctorNames ctorValues
+                filter (\(_, (_,_,_,tp)) ->  typeNEqual tp ourType) $ zip ctorNames ctorValues
       
       let tupleNames = filter (List.isPrefixOf "__Tuple") $ map fst sortedPats
       case (trace ("TUPLE NAMES: " ++ show tupleNames) $ tupleNames) of
@@ -348,15 +348,11 @@ checkIfTotal env rawPatList = trace ("\n\n\n\n\nCHECK IF TOTAL!!!\n" ++ show raw
 --Constrain just like expression literals, but we don't leave the possible set of values open
 --This is for cases where we match against a literal and know its exact value
 constrainLiteral
-  :: Environment
-  -> R.Region
+  :: PatAnnEnv
   -> Literal.Literal
-  -> Type
-  -> IO TypeConstraint
-constrainLiteral env region lit tipe =
-  let
-    t1 === t2 = (CEqual RErr.None region t1 t2)
-  in case lit of
+  -> PatAnn
+  -> IO (AnnConstraint PatInfo)
+constrainLiteral env lit tipe = case lit of
         (Literal.IntNum n) -> 
           return $ tipe === closedAnnot [("_" ++ show n, [])] 
         (Literal.FloatNum f) -> 
