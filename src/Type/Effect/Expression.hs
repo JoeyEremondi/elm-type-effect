@@ -256,13 +256,17 @@ constrain env (A region expr) tipe = do
                         \ (tp, Canonical.Definition pat _ _ ) ->
                           Pattern.constrain env pat tp
              let frag = joinFragments env defFrags
+             let fragEnv = (typeEnv frag)
              --Constrain each RHS of a definition, giving access to all other defs
              --This lets us do mutual recursion
              defConstrs <- forM (zip defVars defs) $
-               \ (tp, Canonical.Definition _ dexp _ ) -> constrain env dexp tp
+               \ (tp, Canonical.Definition pat dexp _ ) -> do
+                 expConstr <- constrain fragEnv dexp tp
+                 canMatchConstr <- Pattern.allMatchConstraints fragEnv tp region [pat]
+                 return $ expConstr /\ canMatchConstr
              --TODO extra pattern match constraints
                
-             cbody <- constrain (typeEnv frag) body tipe
+             cbody <- constrain fragEnv body tipe
              return $  cbody /\ (Common.and defConstrs) /\ (typeConstraint frag)
 
       --Since our annotations work on records to begin with, we just do record manipulations

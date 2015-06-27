@@ -56,6 +56,7 @@ data AnnConstraint info =
   | ConstrAnd (AnnConstraint info ) (AnnConstraint info)
   | InstanceOf (Annot info) (AnnotScheme info)
   | AnnTrue
+  | OnlyContains (Annot info) (Annot info)
 
 --Initialize a pool of variables, returning a source of new variables
 initialEnv :: Env.Environment -> IO (AnnEnv info )

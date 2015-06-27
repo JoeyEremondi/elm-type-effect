@@ -217,7 +217,7 @@ containsWildcard (A.A _ pat) =
 --Must be able to be matched by the patterns
 allMatchConstraints env argType region patList = do
   typeCanMatch <- typeForPatList env region patList
-  return $ (argType === typeCanMatch)
+  return $ argType `OnlyContains` typeCanMatch
 
 
 
