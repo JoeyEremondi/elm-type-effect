@@ -143,7 +143,7 @@ constrain env (A.A _ pattern) tipe =
           
           return $  fragment {
                 typeConstraint = typeConstraint fragment /\ recordStructureConstr,
-                vars = (error "TODO cvars" ) ++ vars fragment --TODO where get constructor vars?
+                vars = vars fragment --TODO where get constructor vars?
               }
       --Record : just map each sub-pattern into fields of a record
       P.Record fields -> do
@@ -156,13 +156,13 @@ constrain env (A.A _ pattern) tipe =
               typeConstraint = c
           }
 
-
+{-
 instance Error (R.Region -> PP.Doc) where
   noMsg _ = PP.empty
   strMsg str span =
       PP.vcat [ PP.text $ "Type error " ++ show span
               , PP.text str ]
-
+-}
 
 --Given a pattern, return name of the top constructor in the pattern
 ctorName :: P.CanonicalPattern -> String
@@ -254,8 +254,8 @@ typeForPatList env region patList = do
       do
         subTypes <- mapM (typeForPatList env region) subPats
         otherFields <- eachCtorHelper otherPats
-        let ourRec = (trace "mkAnnot1" $ mkAnnot [(ctor, subTypes)] otherFields )
-        return ourRec
+        let ourRec = PatData ctor subTypes --TODO need otherFields?
+        return $ BaseAnnot ourRec
 
 
 --Equality check for types, used for sorting through environments and getting constructor types
@@ -358,12 +358,12 @@ constrainLiteral
   -> IO (AnnConstraint PatInfo)
 constrainLiteral env lit tipe = case lit of
         (Literal.IntNum n) -> 
-          return $ tipe === closedAnnot [("_" ++ show n, [])] 
+          return $ tipe `Contains` PatData ("_" ++ show n) [] 
         (Literal.FloatNum f) -> 
-          return $ tipe === closedAnnot [("_" ++ show f, [])] 
+          return $ tipe `Contains` PatData ("_" ++ show f) [] 
         (Literal.Chr u) -> 
-          return  $ tipe === closedAnnot [("_" ++ show u, [])] 
+          return  $ tipe `Contains` PatData ("_" ++ show u) [] 
         (Literal.Str s) -> 
-          return  $ tipe === closedAnnot [("_" ++ show s, [])] 
+          return  $ tipe `Contains` PatData ("_" ++ show s) [] 
         (Literal.Boolean b) -> 
-          return  $ tipe === closedAnnot [("_" ++ show b, [])] 
+          return  $ tipe `Contains` PatData ("_" ++ show b) [] 

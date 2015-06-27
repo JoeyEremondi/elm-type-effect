@@ -32,10 +32,14 @@ import qualified Type.State as TS
 
 import Data.IORef
 
+import Data.Ord (comparing)
+
+import qualified Data.UnionFind.IO as UF
+
 --Generic data type for type annotations
 data Annot info =
   BaseAnnot info
-  | AnnotUnion (Annot info) (Annot info)
+--  | AnnotUnion (Annot info) (Annot info)
   | Empty
   | VarAnnot AnnVar
 
@@ -48,7 +52,7 @@ data AnnEnv info =
    importedInfo :: Env.Environment}
 
 --TODO union-find variables?
-newtype AnnVar = AnnVar Int
+newtype AnnVar = AnnVar (Int, UF.Point Int)
 
 data AnnConstraint info =
   Contains (Annot info) info
@@ -57,6 +61,17 @@ data AnnConstraint info =
   | InstanceOf (Annot info) (AnnotScheme info)
   | AnnTrue
   | OnlyContains (Annot info) (Annot info)
+
+constrNum :: AnnConstraint info -> Int
+constrNum (Unify _ _) = 0
+constrNum (AnnTrue) = -1
+constrNum (Contains _ _) = 1
+constrNum (InstanceOf _ _) = 2
+constrNum (OnlyContains _ _ ) = 3
+
+--Order for constraints, used in solving
+orderConstrs :: AnnConstraint info -> AnnConstraint info -> Ordering
+orderConstrs = comparing constrNum
 
 --Initialize a pool of variables, returning a source of new variables
 initialEnv :: Env.Environment -> IO (AnnEnv info )
@@ -68,7 +83,8 @@ newVar :: AnnEnv info -> IO AnnVar
 newVar env = do
   ret <- readIORef $ ref env
   writeIORef (ref env) (ret + 1)
-  return $ AnnVar ret
+  point <- UF.fresh ret
+  return $ AnnVar (ret, point)
 
 existsWith :: AnnEnv info -> (Annot info -> IO (AnnConstraint info) ) -> IO (AnnConstraint info)
 existsWith env f = do
@@ -146,13 +162,13 @@ trace _ x = x
 --showField (nm, args) = nm ++ " : " ++ (show $ map (TP.pretty TP.App) args)
 
 --TODO make tail recursive?
-mkAnnot :: [(String, [PatAnn] )] -> Annot PatInfo -> Annot PatInfo
-mkAnnot fields otherAnnot = case fields of
-  [] -> otherAnnot
-  ((ctor, info) :rest) -> (BaseAnnot $ PatData ctor info ) `AnnotUnion` (mkAnnot rest otherAnnot )
+--mkAnnot :: [(String, [PatAnn] )] -> Annot PatInfo -> Annot PatInfo
+--mkAnnot fields otherAnnot = case fields of
+--  [] -> otherAnnot
+--  ((ctor, info) :rest) -> (BaseAnnot $ PatData ctor info ) `AnnotUnion` (mkAnnot rest otherAnnot )
   
 
-closedAnnot x = mkAnnot x (Empty)
+--closedAnnot x = mkAnnot x (Empty)
 
 and = foldr ConstrAnd true
 x /\ y = ConstrAnd x y

@@ -120,8 +120,8 @@ constrain env (A region expr) tipe = do
           return $ c1 /\ c2 /\ isTopConstr
 
       --We know that [] is never a cons
-      ExplicitList [] -> liftIO $ exists $ \restOfRec ->
-        return $ tipe === mkAnnot [("_[]", [])] restOfRec
+      ExplicitList [] -> 
+        return $ tipe `Contains` (PatData "_[]" [] )
 
      --We know that an explicit list that's not empty will start with a cons
       --Then we recursively annotate the rest of the list
@@ -131,7 +131,7 @@ constrain env (A region expr) tipe = do
         exists $ \subListType -> do
           exprConstr <- constrain env firstExp exprType
           subListConstr <-  constrain env (A region $ ExplicitList others) subListType
-          let isConsConstr = tipe === mkAnnot [("_::", [exprType, subListType])] restOfRec
+          let isConsConstr = tipe `Contains` (PatData "_::" [exprType, subListType] )
           return $ exprConstr /\ subListConstr /\ isConsConstr
       
       --Treat binops just like functions at the type level
