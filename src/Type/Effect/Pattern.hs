@@ -149,7 +149,7 @@ constrain env (A.A _ pattern) tipe =
       P.Record fields -> do
           pairs <- mapM (\name -> do (,) name <$> newVar env) fields
           let tenv = Map.map VarAnnot $ Map.fromList pairs
-          let c =  (tipe === (BaseAnnot $ PatRecord tenv Empty )) --record (Map.map (:[]) tenv) t
+          let c =  (tipe === (BaseAnnot $ PatRecord tenv emptyAnnot )) --record (Map.map (:[]) tenv) t
           return $ AnnFragment {
               typeEnv        = env {dict = Map.map (SchemeAnnot) tenv},
               vars           = map snd pairs,
@@ -249,7 +249,7 @@ typeForPatList env region patList = do
      else trace ("NOT TOTAL") $ eachCtorHelper (sortByCtor patList)  
   where
     --indexFields = map (\i -> "_sub" ++ show i) ([1..] :: [Int])
-    eachCtorHelper []  = return Empty
+    eachCtorHelper []  = return emptyAnnot
     eachCtorHelper ( (ctor, subPats ) : otherPats) =
       do
         subTypes <- mapM (typeForPatList env region) subPats

@@ -39,11 +39,11 @@ import qualified Data.UnionFind.IO as UF
 --Generic data type for type annotations
 data Annot info =
   BaseAnnot info
---  | AnnotUnion (Annot info) (Annot info)
-  | Empty
-  | VarAnnot AnnVar
+  -- | Empty
+  | VarAnnot (AnnVar info)
 
-data AnnotScheme info = SchemeAnnot (Annot info) | AnnForAll AnnVar (AnnotScheme info) 
+
+data AnnotScheme info = SchemeAnnot (Annot info) | AnnForAll (AnnVar info) (AnnotScheme info) 
 
 data AnnEnv info =
   AnnEnv
@@ -52,7 +52,7 @@ data AnnEnv info =
    importedInfo :: Env.Environment}
 
 --TODO union-find variables?
-newtype AnnVar = AnnVar (Int, UF.Point Int)
+newtype AnnVar info = AnnVar (Int, UF.Point info)
 
 data AnnConstraint info =
   Contains (Annot info) info
@@ -79,14 +79,14 @@ initialEnv tyEnv = do
   nextVar <- newIORef (0 :: Int)
   return $ AnnEnv nextVar (Map.empty) tyEnv
   
-newVar :: AnnEnv info -> IO AnnVar
+newVar :: PatAnnEnv -> IO (AnnVar PatInfo)
 newVar env = do
   ret <- readIORef $ ref env
   writeIORef (ref env) (ret + 1)
-  point <- UF.fresh ret
+  point <- UF.fresh ( PatUnInit)
   return $ AnnVar (ret, point)
 
-existsWith :: AnnEnv info -> (Annot info -> IO (AnnConstraint info) ) -> IO (AnnConstraint info)
+--existsWith :: AnnEnv info -> (Annot info -> IO (AnnConstraint info) ) -> IO (AnnConstraint info)
 existsWith env f = do
   fresh <- newVar env
   f (VarAnnot fresh)
@@ -102,7 +102,7 @@ constructor = Env.constructor . importedInfo
 --TODO avoid code duplication with type fragments?
 data AnnFragment info = AnnFragment
     { typeEnv :: AnnEnv info
-    , vars :: [AnnVar]
+    , vars :: [AnnVar info]
     , typeConstraint :: AnnConstraint info
     }
 
@@ -140,6 +140,8 @@ data PatInfo =
   | PatOther [PatAnn] --TODO need this?
   | Top
   | NativeAnnot
+  | PatUnInit
+  | MultiPat (Map.Map String [PatAnn])
 
 type PatAnn = Annot PatInfo
 
@@ -147,7 +149,7 @@ type PatAnnEnv = AnnEnv PatInfo
 
 type PatFragment = AnnFragment PatInfo
 
-
+emptyAnnot = BaseAnnot $ PatOther []
 
 --import Debug.Trace (trace, traceStack)
 trace _ x = x
