@@ -132,7 +132,7 @@ constrain env (A.A _ pattern) tipe =
             --exists $ \recordSubType -> do
             --exists $ \restOfRec -> do
              let ctorFieldConstr =
-                   tipe `Contains` (BaseAnnot $ PatData ("_" ++ V.toString name) argAnnotVars )
+                   tipe `Contains` ( PatData ("_" ++ V.toString name) argAnnotVars )
              
              argTypesFrags <- mapM (\(pat, t) -> constrain env pat t) $ zip patterns argAnnotVars
              let argTypesFrag = joinFragments env argTypesFrags 
@@ -149,7 +149,7 @@ constrain env (A.A _ pattern) tipe =
       P.Record fields -> do
           pairs <- mapM (\name -> do (,) name <$> newVar env) fields
           let tenv = Map.map VarAnnot $ Map.fromList pairs
-          let c =  (tipe === (BaseAnnot $ PatRecord tenv )) --record (Map.map (:[]) tenv) t
+          let c =  (tipe === (BaseAnnot $ PatRecord tenv Empty )) --record (Map.map (:[]) tenv) t
           return $ AnnFragment {
               typeEnv        = env {dict = Map.map (SchemeAnnot) tenv},
               vars           = map snd pairs,

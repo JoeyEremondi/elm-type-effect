@@ -86,17 +86,13 @@ constrain env (A region expr) tipe = do
         
     
     case expr of
-      Literal lit -> case lit of
-        (IntNum n) -> liftIO $ exists $ \restOfRec ->
-          return $ trace "mkAnnot expr" $ tipe === mkAnnot [("_" ++ show n, [])] restOfRec
-        (FloatNum f) -> liftIO $ exists $ \restOfRec ->
-          return $ tipe === mkAnnot [("_" ++ show f, [])] restOfRec
-        (Chr u) -> liftIO $ exists $ \restOfRec ->
-          return $ tipe === mkAnnot [("_" ++ show u, [])] restOfRec
-        (Str s) -> liftIO $ exists $ \restOfRec ->
-          return $ tipe === mkAnnot [("_" ++ show s, [])] restOfRec
-        (Boolean b) -> liftIO $ exists $ \restOfRec ->
-          return $ tipe === mkAnnot [("_" ++ show b, [])] restOfRec
+      Literal lit -> return $ case lit of
+        (IntNum n) -> 
+          trace "mkAnnot expr" $ tipe `Contains` PatData ("_" ++ show n) [] 
+        (FloatNum f) -> tipe `Contains` PatData ("_" ++ show f) []
+        (Chr u) -> tipe `Contains` PatData ("_" ++ show u) []
+        (Str s) -> tipe `Contains` PatData ("_" ++ show s) []
+        (Boolean b) -> tipe `Contains` PatData ("_" ++ show b) []
 
       GLShader _uid _src gltipe -> return true --We never pattern match against GLSL shaders
 
@@ -107,8 +103,9 @@ constrain env (A region expr) tipe = do
       Var (V.Canonical (V.Module ("Native":_)) _) -> liftIO $  isTop tipe
 
 
-      --Variable has annotation that we look up in the environment
-      Var var -> error "TODO variable? Env?"
+      --Variable has annotation scheme that we look up in the environment
+      Var var ->
+        return $ tipe `InstanceOf` (readEnv name env)
           where
             name = V.toString var
 
@@ -161,18 +158,18 @@ constrain env (A region expr) tipe = do
       Lambda p e ->
           exists $ \targ ->
           exists $ \tbody -> do
-            fragment <- _ --Pattern.constrain env p targ
+            fragment <- Pattern.constrain env p targ
             --TODO constrain arg types
             c2 <- constrain env e tbody
             --Make sure the argument type is only the patterns matched
-            cMatch <- _ --Pattern.allMatchConstraints env targ region [p]
+            cMatch <- Pattern.allMatchConstraints env targ region [p]
             --TODO adjust this for annotations
             c <- _ -- return $ ex (vars fragment) (clet [monoscheme (typeEnv fragment)]
                                              --( typeConstraint fragment /\ c2 ))
             fnTy <- makeFn targ tbody
             let retConstr =
                   --TODO fragment
-                  {-typeConstraint fragment /\ -} cMatch /\ c /\ (tipe === fnTy) -- fnTy
+                  typeConstraint fragment /\  cMatch /\ c /\ (tipe === fnTy) -- fnTy
             return retConstr
 
       --Nothing fancy here: we ensure the function has a function annotation
@@ -210,13 +207,13 @@ constrain env (A region expr) tipe = do
             --t is the type of the expression we match against 
             ce <- constrain env ex texp
             canMatchConstr <-
-                _ --Pattern.allMatchConstraints env texp region (map fst branches)
+                Pattern.allMatchConstraints env texp region (map fst branches)
             --canMatchType <- Pattern.typeForPatList env region (map fst branches)
             let branchConstraints (p,e) =
                   --exists $ \retAnnot -> 
                   exists $ \patType -> do
                     --let recType = _
-                    fragment <- _ -- Pattern.constrain  env p patType --texp
+                    fragment <- Pattern.constrain  env p patType --texp
                     letConstr <- _ --clet [toScheme fragment] <$> constrain env e tipe 
                     return 
                       $ letConstr  -- /\  tipe === retAnnot --TODO remove?
@@ -271,20 +268,23 @@ constrain env (A region expr) tipe = do
         exists $ \recordType ->
         exists $ \restOfRecord -> do
           recordConstr <- constrain env e recordType 
-          return $ recordConstr /\ _ --(recordType === (directRecord [(label, tipe)] restOfRecord))
+          return $ recordConstr /\
+            (recordType ===
+             (BaseAnnot $ PatRecord (Map.fromList [(label, tipe)]) restOfRecord))
           
       Remove e label ->
         exists $ \originalRecType ->
         exists $ \fieldType -> do
           recordConstr <- constrain env e originalRecType 
-          return $ recordConstr /\ _ --(originalRecType === (directRecord [(label, fieldType)] tipe))
+          return $ recordConstr /\
+            (originalRecType === (BaseAnnot $ PatRecord  (Map.fromList [(label, fieldType)]) tipe))
         
           
       Insert e label value ->
         exists $ \originalRecType ->
         exists $ \newFieldType -> do
           recordConstr <- constrain env e originalRecType 
-          return $ recordConstr /\  _ --(tipe === (directRecord [(label, newFieldType)] originalRecType))
+          return $ recordConstr /\  (tipe === (BaseAnnot $ PatRecord (Map.fromList [(label, newFieldType)]) originalRecType))
 
       Modify e fields ->
         exists $ \originalRecType ->
@@ -301,7 +301,7 @@ constrain env (A region expr) tipe = do
           return $
             recordConstr
             /\ fieldTypeConstr
-            -- /\(tipe === (directRecord fieldTypePairs restOfRec))
+            /\ (tipe === (BaseAnnot $ PatRecord (Map.fromList fieldTypePairs) restOfRec))
           
       --Recursive: a record with no fields is empty
       --And for a record with fields, we infer the annotation for its field
@@ -317,7 +317,7 @@ constrain env (A region expr) tipe = do
             return $
               fieldConstr
               /\ otherConstr
-              -- /\ tipe === directRecord [(nm, fieldType)] restOfRec
+              /\ (tipe === (BaseAnnot $ PatRecord (Map.fromList [(nm, fieldType)]) restOfRec))
 
 
 
@@ -392,11 +392,11 @@ constrainCtor region env rawName tipe = trace "DATA one " $ do
         doWithArgTypes typeVars theKey arity []
         where
           
-          doWithArgTypes typeVars nm 0 argTypes = _ $ \restOfRecord ->
-              do
-                let ctorRetType = mkAnnot [("_" ++ nm, argTypes )] restOfRecord
-                ctorAnnotation <- makeCtorType (reverse argTypes) ctorRetType
-                return _ -- $ CEqual RErr.None region tipe (ctorAnnotation)
+          doWithArgTypes typeVars nm 0 argTypes =
+                existsWith env $ \ ctorRetType -> do
+                  let ctorRetAnnot = PatData ("_" ++ nm) argTypes
+                  ctorAnnotation <- makeCtorType (reverse argTypes) ctorRetType
+                  return $ (ctorRetType `Contains` ctorRetAnnot) /\ (tipe === ctorAnnotation)
           
           doWithArgTypes typeVars nm arity argTypes =
             _ $ \t ->

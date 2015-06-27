@@ -51,8 +51,10 @@ data AnnEnv info =
 newtype AnnVar = AnnVar Int
 
 data AnnConstraint info =
-  Contains (Annot info) (Annot info)
+  Contains (Annot info) info
+  | Unify (Annot info) (Annot info)
   | ConstrAnd (AnnConstraint info ) (AnnConstraint info)
+  | InstanceOf (Annot info) (AnnotScheme info)
   | AnnTrue
 
 --Initialize a pool of variables, returning a source of new variables
@@ -117,7 +119,7 @@ joinFragments env =
 data PatInfo =
   PatLambda PatAnn PatAnn
   | PatData String [PatAnn]
-  | PatRecord (Map.Map String PatAnn)
+  | PatRecord (Map.Map String PatAnn) PatAnn
   | PatOther [PatAnn] --TODO need this?
   | Top
   | NativeAnnot
@@ -154,7 +156,7 @@ closedAnnot x = mkAnnot x (Empty)
 and = foldr ConstrAnd true
 x /\ y = ConstrAnd x y
 true = AnnTrue
-t1 === t2 = (t1 `Contains` t2 ) /\ (t2 `Contains` t1)
+t1 === t2 = (t1 `Unify` t2 )
 
 {-
 
