@@ -28,7 +28,7 @@ import qualified AST.Type as ST
 import qualified AST.Variable as V
 --import Type.Type hiding (Descriptor(..))
 --import Type.Fragment
---import qualified Type.Environment as Env
+import qualified Type.Environment as Env
 import qualified Type.Effect.Literal as Literal
 import qualified Type.Effect.Pattern as Pattern
 
@@ -160,16 +160,15 @@ constrain env (A region expr) tipe = do
           exists $ \tbody -> do
             fragment <- Pattern.constrain env p targ
             --TODO constrain arg types
-            c2 <- constrain env e tbody
+            c2 <- constrain (typeEnv fragment) e tbody
             --Make sure the argument type is only the patterns matched
             cMatch <- Pattern.allMatchConstraints env targ region [p]
             --TODO adjust this for annotations
-            c <- _ -- return $ ex (vars fragment) (clet [monoscheme (typeEnv fragment)]
-                                             --( typeConstraint fragment /\ c2 ))
+            
             fnTy <- makeFn targ tbody
             let retConstr =
                   --TODO fragment
-                  typeConstraint fragment /\  cMatch /\ c /\ (tipe === fnTy) -- fnTy
+                  typeConstraint fragment /\  cMatch /\ (tipe === fnTy) -- fnTy
             return retConstr
 
       --Nothing fancy here: we ensure the function has a function annotation
@@ -214,11 +213,11 @@ constrain env (A region expr) tipe = do
                   exists $ \patType -> do
                     --let recType = _
                     fragment <- Pattern.constrain  env p patType --texp
-                    letConstr <- _ --clet [toScheme fragment] <$> constrain env e tipe 
+                    letConstr <- constrain (typeEnv fragment) e tipe 
                     return 
-                      $ letConstr  -- /\  tipe === retAnnot --TODO remove?
-            joinedBranchConstraints <- mapM branchConstraints branches
-            let resultConstr = Common.and joinedBranchConstraints
+                      $ letConstr --  /\  tipe `Contains` retAnnot --TODO remove?
+            allBranchConstraints <- mapM branchConstraints branches
+            let resultConstr = Common.and allBranchConstraints
             --We can get infinite types if we try to combine our branches
             --So we always assume we return top
             --TODO better solution?
@@ -298,7 +297,7 @@ constrain env (A region expr) tipe = do
         exists $ \restOfRec -> do
           recordConstr <- constrain env e originalRecType 
           fieldNewTypeConstrs <- forM fields $ \(nm, fexp) -> do
-            newFieldType <- _ --newVar
+            newFieldType <- VarAnnot <$> newVar env
             fieldConstr <- constrain env fexp newFieldType 
             return (nm, newFieldType, fieldConstr)
           let fieldTypeConstr = foldr  (\(_,_,c1) c2 -> c1 /\ c2) true fieldNewTypeConstrs
@@ -382,7 +381,7 @@ constrainCtor region env rawName tipe = trace "DATA one " $ do
               then rawName
               else ("Main." ++ rawName )
         --(arity, cvars, args, result) <- liftIO $ freshDataScheme env (V.toString name)
-        let ctorDict =_ -- Env.constructor env
+        let ctorDict = constructor env
         let theKey =
               if Map.member rawName ctorDict
               then rawName
@@ -394,7 +393,7 @@ constrainCtor region env rawName tipe = trace "DATA one " $ do
                 in if (null possibleKeys)
                       then error $ "Name " ++ (show rawName) ++ " not in dict " ++ show (Map.keys ctorDict)
                       else head possibleKeys
-        (arity,typeVars,_,_) <- _ -- liftIO $ Env.get env Env.constructor theKey 
+        (arity,typeVars,_,_) <- Env.get (importedInfo env) Env.constructor theKey 
         doWithArgTypes typeVars theKey arity []
         where
           
@@ -405,7 +404,7 @@ constrainCtor region env rawName tipe = trace "DATA one " $ do
                   return $ (ctorRetType `Contains` ctorRetAnnot) /\ (tipe === ctorAnnotation)
           
           doWithArgTypes typeVars nm arity argTypes =
-            _ $ \t ->
+            existsWith env $ \t ->
               doWithArgTypes typeVars nm (arity - 1) (t:argTypes)
           --Constructor take
           makeCtorType [] ret = return ret
