@@ -44,7 +44,7 @@ data AnnotScheme info = SchemeAnnot (Annot info) | AnnForAll AnnVar (AnnotScheme
 data AnnEnv info =
   AnnEnv
   {ref :: (IORef Int),
-   dict :: (Map.Map V.Canonical (AnnotScheme info)),
+   dict :: (Map.Map String (AnnotScheme info)),
    importedInfo :: Env.Environment}
 
 --TODO union-find variables?
@@ -72,10 +72,10 @@ existsWith env f = do
   fresh <- newVar env
   f (VarAnnot fresh)
 
-addAnnToEnv :: V.Canonical -> (AnnotScheme info) -> AnnEnv info -> AnnEnv info
+addAnnToEnv :: String -> (AnnotScheme info) -> AnnEnv info -> AnnEnv info
 addAnnToEnv var ty env = env {dict = Map.insert var ty (dict env)} 
 
-readEnv :: V.Canonical -> AnnEnv info -> (AnnotScheme info)
+readEnv :: String -> AnnEnv info -> (AnnotScheme info)
 readEnv var env = (dict env) Map.! var
 
 constructor = Env.constructor . importedInfo
@@ -117,7 +117,8 @@ joinFragments env =
 data PatInfo =
   PatLambda PatAnn PatAnn
   | PatData String [PatAnn]
-  | PatOther [PatAnn] --Catch-all case for tuples, records, etc.
+  | PatRecord (Map.Map String PatAnn)
+  | PatOther [PatAnn] --TODO need this?
   | Top
   | NativeAnnot
 

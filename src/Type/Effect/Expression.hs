@@ -36,9 +36,10 @@ import qualified Reporting.Error.Type as RErr
 
 import Data.Char (isUpper)
 
-import Type.Effect.Common
+import Type.Effect.Common as Common
 
 --import Debug.Trace (trace)
+
 
 nativeOps = map (\n -> V.Canonical (V.Module ["Basics"]) n ) [
   "+"
@@ -189,7 +190,7 @@ constrain env (A region expr) tipe = do
       MultiIf branches ->  do
         branchConstrs <- mapM constrain' branches
         isTopConstr <- isTop tipe 
-        return $ isTopConstr /\ (and branchConstrs) 
+        return $ isTopConstr /\ (Common.and branchConstrs) 
           where
               --Ensure each branch has the same type as the overall expr
              --TODO ensure True is in a guard?
@@ -220,7 +221,7 @@ constrain env (A region expr) tipe = do
                     return 
                       $ letConstr  -- /\  tipe === retAnnot --TODO remove?
             joinedBranchConstraints <- mapM branchConstraints branches
-            let resultConstr = and joinedBranchConstraints
+            let resultConstr = Common.and joinedBranchConstraints
             --We can get infinite types if we try to combine our branches
             --So we always assume we return top
             --TODO better solution?
