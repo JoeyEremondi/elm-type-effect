@@ -80,38 +80,38 @@ constrain env (A.A _ pattern) tipe =
                         
                         let ourFieldConstr = _ -- ty === (directRecord [("_sub" ++ show n, fieldAnnot)] restOfRec)
                         return $ _ -- constr /\ ourFieldConstr
-                  let newFrag = _ --joinFragments [frag, ourFieldFrag {typeConstraint = newConstr}]
+                  let newFrag = joinFragments env [frag, ourFieldFrag {typeConstraint = newConstr}]
                   genSubTypeConstr ty rest (n+1) newFrag 
     in
     case pattern of
       --No constraints when we match anything, no variables either
-      P.Anything -> return _ --emptyFragment
+      P.Anything -> return $ emptyFragment env
 
       --We know the exact value of a literal
       P.Literal lit -> do
           c <- constrainLiteral env lit tipe
-          return $ _ -- emptyFragment { typeConstraint = c }
+          return $ (emptyFragment env) { typeConstraint = c }
 
       --Variable: could have any annotations, so use a fresh typeVar
       P.Var name -> do
-          v <- VarAnnot <$> newVar env
-          return $ _ --Fragment {
-              --typeEnv    = Map.singleton name ( A.A region (varN v)),
-              --vars       = [v],
-              --typeConstraint = varN v === tipe
-          --}
+          v <- newVar env
+          return $ AnnFragment {
+              typeEnv    = _, -- Map.singleton name ( A.A region (varN v)),
+              vars       = [v],
+              typeConstraint = VarAnnot v === tipe
+          }
 
       --Alias: just add the name of the pattern to a fragment, then constrain the pattern
       --This is used for things like sort ((x,y) as pair) = if x < y then pair else (y,x)
       P.Alias name p -> do
-          varType <- VarAnnot <$> newVar env
+          v <-  newVar env
           fragment <- constrain env p tipe
           --TODO this case? Constrain alias?
-          return $ _ --fragment
-            --{ typeEnv = Map.insert name (A.A region varType) (typeEnv fragment)
-            -- , vars    = v : vars fragment
-            --, typeConstraint = varType === tipe /\ typeConstraint fragment
-            --}
+          return $ fragment
+            { typeEnv = _ --Map.insert name (A.A region varType) (typeEnv fragment)
+             , vars    = v : vars fragment
+            , typeConstraint = (VarAnnot v === tipe) /\ typeConstraint fragment
+            }
 
       --Data: go into sub-patterns to extract their fragments
       --And constrain that the final result has the given constructor  
@@ -120,8 +120,8 @@ constrain env (A.A _ pattern) tipe =
           --(kind, cvars, args, result) <- liftIO $ freshDataScheme env (V.toString name)
           args <- _
           cvars <- _
-          argTypes <- mapM (\_ -> newVar env) args
-          fragment <- _ --Monad.liftM _ (Monad.zipWithM (constrain env) patterns argTypes)
+          argTypes <- mapM (\_ -> VarAnnot <$> newVar env) args
+          fragment <- (joinFragments env ) <$> Monad.zipWithM (constrain env) patterns argTypes
           --return fragment --TODO right?
           --We don't constrain at all here, since we already did the pattern match check
           --TODO let-expression for special cases?
@@ -236,11 +236,12 @@ fieldSubset f1 f2 =
 
 --Generate the annotation of all patterns which can be matched
 --By the given list of patterns
---typeForPatList
---  :: Environment -> R.Region -> [P.CanonicalPattern]
---    -> ErrorT [PP.Doc] IO Type
+typeForPatList
+  :: PatAnnEnv -> R.Region -> [P.CanonicalPattern]
+    -> IO PatAnn
 typeForPatList env region patList = do
   isTotal <- checkIfTotal env patList
+  openVar <- VarAnnot <$> newVar env
   if isTotal
      then trace ("IS TOTAL " ++ show patList) $ _ --anyVar
      else trace ("NOT TOTAL") $ eachCtorHelper (sortByCtor patList)  
@@ -297,10 +298,10 @@ removeUnderscore s = case s of
 --This is used to ensure that complete pattern matches can match against Top,
 --Even in the case where no wildcard is present
 --Since integers have no constructors (only literals), this will never succeed for integers
---checkIfTotal
---  :: Environment
---  -> [P.CanonicalPattern]
---  -> ErrorT [PP.Doc] IO Bool
+checkIfTotal
+  :: PatAnnEnv
+  -> [P.CanonicalPattern]
+  -> IO Bool
 --Special case: only ever 1 option for pattern matching on a record
 --So it doesn't play into our totality calculations
 checkIfTotal _ [A.A _ (P.Record _)] = return True
@@ -319,7 +320,7 @@ checkIfTotal env rawPatList = trace ("\n\n\n\n\nCHECK IF TOTAL!!!\n" ++ show raw
     ([], _) -> return False
     (_,False) -> do
       --TODO pattern match on Bool?
-      let allCtors = constructor env
+      let allCtors = _ --constructor env --TODO need real env?
       let ctorNames = Map.keys allCtors
       
       ctorValues <- mapM liftIO $ Map.elems allCtors

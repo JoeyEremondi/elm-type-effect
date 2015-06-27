@@ -41,7 +41,11 @@ data Annot info =
 
 data AnnotScheme info = SchemeAnnot (Annot info) | AnnForAll AnnVar (AnnotScheme info) 
 
-data AnnEnv info = AnnEnv (IORef Int) (Map.Map V.Canonical (AnnotScheme info))
+data AnnEnv info =
+  AnnEnv
+  {ref :: (IORef Int),
+   dict :: (Map.Map V.Canonical (AnnotScheme info)),
+   importedInfo :: Env.Environment}
 
 --TODO union-find variables?
 newtype AnnVar = AnnVar Int
@@ -52,15 +56,15 @@ data AnnConstraint info =
   | AnnTrue
 
 --Initialize a pool of variables, returning a source of new variables
-initialEnv :: IO (AnnEnv info )
-initialEnv = do
+initialEnv :: Env.Environment -> IO (AnnEnv info )
+initialEnv tyEnv = do
   nextVar <- newIORef (0 :: Int)
-  return $ AnnEnv nextVar (Map.empty)
+  return $ AnnEnv nextVar (Map.empty) tyEnv
   
 newVar :: AnnEnv info -> IO AnnVar
-newVar (AnnEnv ref _) = do
-  ret <- readIORef ref
-  writeIORef ref (ret + 1)
+newVar env = do
+  ret <- readIORef $ ref env
+  writeIORef (ref env) (ret + 1)
   return $ AnnVar ret
 
 existsWith :: AnnEnv info -> (Annot info -> IO (AnnConstraint info) ) -> IO (AnnConstraint info)
@@ -69,10 +73,12 @@ existsWith env f = do
   f (VarAnnot fresh)
 
 addAnnToEnv :: V.Canonical -> (AnnotScheme info) -> AnnEnv info -> AnnEnv info
-addAnnToEnv var ty (AnnEnv ref dict ) = AnnEnv ref $ Map.insert var ty dict 
+addAnnToEnv var ty env = env {dict = Map.insert var ty (dict env)} 
 
 readEnv :: V.Canonical -> AnnEnv info -> (AnnotScheme info)
-readEnv var (AnnEnv _ dict) = dict Map.! var
+readEnv var env = (dict env) Map.! var
+
+constructor = Env.constructor . importedInfo
 
 --TODO avoid code duplication with type fragments?
 data AnnFragment info = AnnFragment
@@ -82,17 +88,17 @@ data AnnFragment info = AnnFragment
     }
 
 emptyFragment :: AnnEnv info -> AnnFragment info
-emptyFragment (AnnEnv ref _) =
-    AnnFragment (AnnEnv ref Map.empty) [] AnnTrue
+emptyFragment env =
+    AnnFragment (env { dict = Map.empty}) [] AnnTrue
 
 joinFragment :: AnnFragment info -> AnnFragment info -> AnnFragment info
 joinFragment f1 f2 =
     AnnFragment
       { typeEnv =
            let
-             (AnnEnv ref dict1 ) = typeEnv f1
-             (AnnEnv _ dict2) = typeEnv f2
-           in AnnEnv ref $ Map.union dict1 dict2
+             env1 = typeEnv f1
+             env2 = typeEnv f2
+           in env1 { dict = Map.union (dict env1) (dict env2)}
 
       , vars =
           vars f1 ++ vars f2
@@ -100,7 +106,12 @@ joinFragment f1 f2 =
       , typeConstraint =
           typeConstraint f1 /\ typeConstraint f2
       }
-    
+
+joinFragments :: AnnEnv info -> [AnnFragment info] -> AnnFragment info
+joinFragments env =
+    List.foldl' (flip joinFragment) $ emptyFragment env
+
+      
 
 --Info specific to exhaustiveness-analysis
 data PatInfo =
