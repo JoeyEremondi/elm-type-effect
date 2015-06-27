@@ -60,6 +60,7 @@ constrain env (A.A _ pattern) tipe =
         --With their precise values
         --Nothing fancy, really just looping over the patterns
         --And joining their fragments, recusively calling constrain on them
+        {-
         genSubTypeConstr :: PatAnn -> [P.CanonicalPattern] -> Int -> PatFragment -> IO PatFragment
         genSubTypeConstr ty patList num frag = do
           let thePatList :: [P.CanonicalPattern]
@@ -81,7 +82,8 @@ constrain env (A.A _ pattern) tipe =
                         let ourFieldConstr = _ -- ty === (directRecord [("_sub" ++ show n, fieldAnnot)] restOfRec)
                         return $ constr /\ ourFieldConstr
                   let newFrag = joinFragments env [frag, ourFieldFrag {typeConstraint = newConstr}]
-                  genSubTypeConstr ty rest (n+1) newFrag 
+                  genSubTypeConstr ty rest (n+1) newFrag
+         -}
     in
     case pattern of
       --No constraints when we match anything, no variables either
@@ -125,13 +127,15 @@ constrain env (A.A _ pattern) tipe =
           --We don't constrain at all here, since we already did the pattern match check
           --TODO let-expression for special cases?
               
-          recordStructureConstr <-
-            exists $ \recordSubType -> do
+          recordStructureConstr <- do
+             argAnnotVars <- mapM (\_ -> VarAnnot <$> newVar env) patterns  
+            --exists $ \recordSubType -> do
             --exists $ \restOfRec -> do
              let ctorFieldConstr =
-                   tipe `Contains` (BaseAnnot $ PatData ("_" ++ V.toString name) [recordSubType] )
+                   tipe `Contains` (BaseAnnot $ PatData ("_" ++ V.toString name) argAnnotVars )
              
-             argTypesFrag <- genSubTypeConstr recordSubType patterns 1 (emptyFragment env)
+             argTypesFrags <- mapM (\(pat, t) -> constrain env pat t) $ zip patterns argAnnotVars
+             let argTypesFrag = joinFragments env argTypesFrags 
              let argTypesConstr = typeConstraint argTypesFrag
              return $ ctorFieldConstr /\ argTypesConstr
              --genSubTypeConstr tipe args 1 $ A.A region CTrue
