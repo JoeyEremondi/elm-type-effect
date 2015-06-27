@@ -76,7 +76,7 @@ constrain env (A.A _ pattern) tipe =
                   newConstr <-
                       exists $ \restOfRec -> do
                       --exists $ \fieldAnnot -> do
-                        let constr = snd frag 
+                        let constr = typeConstraint frag 
                         
                         let ourFieldConstr = _ -- ty === (directRecord [("_sub" ++ show n, fieldAnnot)] restOfRec)
                         return $ _ -- constr /\ ourFieldConstr
@@ -119,6 +119,7 @@ constrain env (A.A _ pattern) tipe =
           --TODO is this the right args?
           --(kind, cvars, args, result) <- liftIO $ freshDataScheme env (V.toString name)
           args <- _
+          cvars <- _
           argTypes <- mapM (\_ -> newVar env) args
           fragment <- _ --Monad.liftM _ (Monad.zipWithM (constrain env) patterns argTypes)
           --return fragment --TODO right?
@@ -131,23 +132,23 @@ constrain env (A.A _ pattern) tipe =
              let ctorFieldConstr =
                    tipe === _ -- directRecord [("_" ++ V.toString name, recordSubType )] restOfRec
              
-             argTypesFrag <- genSubTypeConstr recordSubType patterns 1 emptyFragment
+             argTypesFrag <- genSubTypeConstr recordSubType patterns 1 (emptyFragment env)
              let argTypesConstr = typeConstraint argTypesFrag
              return $ ctorFieldConstr /\ argTypesConstr
              --genSubTypeConstr tipe args 1 $ A.A region CTrue
             --return $ tipe === mkRecord [("_" ++ V.toString name, args )] restOfRec
           
-          return $ _ --fragment {
-                --typeConstraint = typeConstraint fragment /\ recordStructureConstr,
-                --vars = cvars ++ vars fragment
-              --}
+          return $  fragment {
+                typeConstraint = typeConstraint fragment /\ recordStructureConstr,
+                vars = cvars ++ vars fragment
+              }
       --Record : just map each sub-pattern into fields of a record
       P.Record fields -> do
           pairs <- _ --mapM (\name -> (,) name <$> variable Flexible) fields
           let tenv = _ --Map.fromList (map ( (second varN)) pairs)
           c <- exists $ \t -> return (tipe === _) --record (Map.map (:[]) tenv) t
-          return $ Fragment {
-              typeEnv        = Map.map (A.A region ) tenv,
+          return $ AnnFragment {
+              typeEnv        = tenv,
               vars           = map snd pairs,
               typeConstraint = c
           }
@@ -229,7 +230,7 @@ fieldSubset f1 f2 =
           t1 = case Map.lookup n f1 of
             Nothing -> error $ "Key " ++ show n ++ " not in map " ++ show (Map.keys f1)
             Just x -> x
-          pairWise = List.all (uncurry typeNEqual) $ zip t1 t2
+          pairWise = _ --List.all (uncurry typeNEqual) $ zip t1 t2
         in (length t1 == length t2) && pairWise
   in List.all valueGood f2Values
 
@@ -262,7 +263,7 @@ type1Equal t1 t2 = case (t1, t2) of
   (TT.Var1 t1a, TT.Var1 t2a) -> typeNEqual t1a t2a
   (TT.EmptyRecord1, TT.EmptyRecord1) -> True
   (TT.Record1 fields1 t1b, TT.Record1 fields2 t2b) ->
-    (fieldSubset fields1 fields2) && (fieldSubset fields2 fields1) && (typeNEqual t1b t2b)
+    _ --(fieldSubset fields1 fields2) && (fieldSubset fields2 fields1) && (typeNEqual t1b t2b)
   _ -> False
 
 --Check if two types are literally identical
