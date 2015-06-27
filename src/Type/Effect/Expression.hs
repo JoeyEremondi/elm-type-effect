@@ -250,15 +250,21 @@ constrain env (A region expr) tipe = do
       --Let expressions: we iterate through the definitions of the let expression
       --Getting the schemes for each (mutually recursive) definition
       --We constrain the body given the defintions of the let variable
-      Let defs body -> --TODO ensure less than pattern type
-          do c <- constrain env body tipe
-             (schemes, rqs, fqs, header, c2, c1) <-
-                 Monad.foldM (constrainDef region env)
-                             ([], [], [], Map.empty, true, true)
-                             (concatMap expandPattern defs)
-             return $ _ --clet schemes
-                      --     (clet [Scheme rqs fqs (clet [monoscheme header] c2) header ]
-                      --           (c1 /\ c))
+      Let defs body -> do --TODO ensure less than pattern type
+             --Constrain the pattern of each definition
+             defVars <- forM defs $ \ _ -> VarAnnot <$> newVar env
+             defFrags <- forM (zip defVars defs) $
+                        \ (tp, Canonical.Definition pat _ _ ) ->
+                          Pattern.constrain env pat tp
+             let frag = joinFragments env defFrags
+             --Constrain each RHS of a definition, giving access to all other defs
+             --This lets us do mutual recursion
+             defConstrs <- forM (zip defVars defs) $
+               \ (tp, Canonical.Definition _ dexp _ ) -> constrain env dexp tp
+             --TODO extra pattern match constraints
+               
+             cbody <- constrain (typeEnv frag) body tipe
+             return $  cbody /\ (Common.and defConstrs) /\ (typeConstraint frag)
 
       --Since our annotations work on records to begin with, we just do record manipulations
       --Like we would for normal typechecking
@@ -328,7 +334,7 @@ constrain env (A region expr) tipe = do
 --With the defined variables added to their environment
 --This is also where we close over schemes, since we have Let polymorphism
 --constrainDef :: R.Region -> Env.Environment -> Info -> Canonical.Def
-constrainDef region env info (Canonical.Definition pattern expr maybeTipe) = _
+--constrainDef region env info (Canonical.Definition pattern expr maybeTipe) = _
 {-
     let qs = [] -- should come from the def, but I'm not sure what would live there...
         (schemes, rigidQuantifiers, flexibleQuantifiers, headers, c2, c1) = info
