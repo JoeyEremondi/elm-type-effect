@@ -1,3 +1,4 @@
+
 module Type.Annotate where
 
 import Control.Arrow (first, second)
@@ -62,11 +63,11 @@ checkTotality interfaces modul =
     unsafePerformIO $ do
         (header, constraint) <-
             liftIO (genTotalityConstraints interfaces modul)
-        state <-  Solve.solveToState constraint
-        let warnings = List.foldr (\ (A.A reg p) soFar ->
+        state <- trace ("\n\n\n********* " ++ showConstr constraint ++ "**************\n\n\n" ) $ Solve.solveToState constraint
+        let warnings = List.foldr (\ ap@(A.A reg p) soFar ->
                                   case p of
                                     Error.Mismatch m -> [(reg, missingCaseWarning m)] ++ soFar
-                                    _ -> soFar) [] (TS.sError state)
+                                    _ -> error ("\nOTHER ERROR " ++ errToString ap )) [] (TS.sError state)
 
         let header' = Map.delete "::" header
         let types = Map.map A.drop (Map.difference (TS.sSavedEnv state) header')

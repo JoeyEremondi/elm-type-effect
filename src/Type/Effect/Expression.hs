@@ -38,7 +38,7 @@ import Data.Char (isUpper)
 
 import Type.Effect.Common
 
---import Debug.Trace (trace)
+import Debug.Trace (trace)
 
 nativeOps = map (\n -> V.Canonical (V.Module ["Basics"]) n ) [
   "+"
@@ -51,7 +51,7 @@ nativeOps = map (\n -> V.Canonical (V.Module ["Basics"]) n ) [
   ,"*"
   ]
 
-trace _ x = x
+--trace _ x = x
 
 newVar = varN `fmap` (liftIO $ variable Flexible)
 
@@ -64,15 +64,15 @@ constrain
     -> Canonical.Expr
     -> Type
     -> IO TypeConstraint
-constrain env (A region expr) tipe = 
+constrain env (A region expr) tipe = do 
     let list t = Env.get env Env.types "List" <| t
-        and = CAnd
-        true = CTrue
-        t1 === t2 = CEqual RErr.None region t1 t2
-        t1 ==> t2 = error "BAD LAMBDA TODO"--
+        and = ConstrAnd
+        true = AnnTrue
+        t1 === t2 = (t1 `Contains` t2 ) `and` (t2 `Contains` t1)
+        --t1 ==> t2 = error "BAD LAMBDA TODO"--
          --We override this for our fn def
-        x <? t = (CInstance region x t)
-        clet schemes c = CLet schemes c
+        --x <? t = (CInstance region x t)
+        --clet schemes c = CLet schemes c
         
         --emptyRec = termN EmptyRecord1
         bool = Env.get env Env.types "Bool"
@@ -82,7 +82,7 @@ constrain env (A region expr) tipe =
             return $ (t === mkAnnot [("__Top", [])] restOfRec)
         
         
-    in
+    
     case expr of
       Literal lit -> case lit of
         (IntNum n) -> liftIO $ exists $ \restOfRec ->
@@ -168,7 +168,7 @@ constrain env (A region expr) tipe =
             cMatch <- Pattern.allMatchConstraints env targ region [p]
             --TODO adjust this for annotations
             c <- return $ ex (vars fragment) (clet [monoscheme (typeEnv fragment)]
-                                             ( c2 ))
+                                             ( typeConstraint fragment /\ c2 ))
             fnTy <- makeFn targ tbody
             let retConstr =
                   typeConstraint fragment /\ cMatch /\ c /\ tipe === fnTy
@@ -202,27 +202,30 @@ constrain env (A region expr) tipe =
       --Additionally, we ensure that the annotation of the expression matched against
       --Is a subtype of the patterns that can be matched
       --We also do some manipulation with fragments (variables) bound by pattern matches
-      Case ex branches -> 
-          exists $ \texp ->
-          exists $ \tReturn -> do
+      Case ex branches ->
+          exists $ \restOfRec ->
+          exists $ \texp -> do
+          --exists $ \tReturn -> do
             --t is the type of the expression we match against 
             ce <- constrain env ex texp
             canMatchConstr <-
                 Pattern.allMatchConstraints env texp region (map fst branches)
             --canMatchType <- Pattern.typeForPatList env region (map fst branches)
             let branchConstraints (p,e) =
-                  exists $ \retAnnot -> 
+                  --exists $ \retAnnot -> 
                   exists $ \patType -> do
                     --let recType = _
                     fragment <- Pattern.constrain  env p patType --texp
-                    letConstr <- clet [toScheme fragment] <$> constrain env e retAnnot 
-                    return $ letConstr  /\ retAnnot === tipe --TODO remove?
-            resultConstr <- and . (:) ce <$> mapM branchConstraints branches
+                    letConstr <- clet [toScheme fragment] <$> constrain env e tipe 
+                    return 
+                      $ letConstr  -- /\  tipe === retAnnot --TODO remove?
+            joinedBranchConstraints <- mapM branchConstraints branches
+            let resultConstr = and joinedBranchConstraints
             --We can get infinite types if we try to combine our branches
             --So we always assume we return top
             --TODO better solution?
             --isTopConstr <- isTop tipe
-            return $ canMatchConstr /\ resultConstr -- /\ isTopConstr --TODO more precise?
+            return $ ce /\ canMatchConstr /\ resultConstr /\ tipe === (mkAnnot [("_MYTEST", [] )] restOfRec) -- /\ isTopConstr --TODO more precise?
 
 
       --A Constructor has a function type, accepting any argument
