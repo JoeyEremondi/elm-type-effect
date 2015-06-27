@@ -26,9 +26,9 @@ import qualified Reporting.PrettyPrint as TP
 import qualified Reporting.Region as R
 import qualified AST.Type as ST
 import qualified AST.Variable as V
-import Type.Type hiding (Descriptor(..))
-import Type.Fragment
-import qualified Type.Environment as Env
+--import Type.Type hiding (Descriptor(..))
+--import Type.Fragment
+--import qualified Type.Environment as Env
 import qualified Type.Effect.Literal as Literal
 import qualified Type.Effect.Pattern as Pattern
 
@@ -38,7 +38,7 @@ import Data.Char (isUpper)
 
 import Type.Effect.Common
 
-import Debug.Trace (trace)
+--import Debug.Trace (trace)
 
 nativeOps = map (\n -> V.Canonical (V.Module ["Basics"]) n ) [
   "+"
@@ -53,33 +53,37 @@ nativeOps = map (\n -> V.Canonical (V.Module ["Basics"]) n ) [
 
 --trace _ x = x
 
-newVar = varN `fmap` (liftIO $ variable Flexible)
+--newVar = varN `fmap` (liftIO $ variable Flexible)
 
+--TODO remove from IO
 makeFn t1 t2 = do
-  topTy <- newVar
-  return $ closedAnnot [("_Lambda", [t1, t2]), ("__Top", [] )] 
+  return $ BaseAnnot $ PatLambda t1 t2 
 
 constrain
-    :: Env.Environment
+    :: PatAnnEnv
     -> Canonical.Expr
-    -> Type
-    -> IO TypeConstraint
+    -> PatAnn
+    -> IO (AnnConstraint PatInfo)
 constrain env (A region expr) tipe = do 
-    let list t = Env.get env Env.types "List" <| t
+    let --list t = Env.get env Env.types "List" $ t
         and = ConstrAnd
+        x /\ y = and x y
         true = AnnTrue
         t1 === t2 = (t1 `Contains` t2 ) `and` (t2 `Contains` t1)
         --t1 ==> t2 = error "BAD LAMBDA TODO"--
          --We override this for our fn def
         --x <? t = (CInstance region x t)
         --clet schemes c = CLet schemes c
+
+        exists :: (Annot info -> IO (AnnConstraint info) ) -> IO (AnnConstraint info)
+        exists = existsWith _
         
         --emptyRec = termN EmptyRecord1
-        bool = Env.get env Env.types "Bool"
-        top = Env.get env Env.types "Int"
+        --bool = Env.get env Env.types "Bool"
+        --top = Env.get env Env.types "Int"
         isTop t =
           exists $ \restOfRec ->
-            return $ (t === mkAnnot [("__Top", [])] restOfRec)
+            return $ (t === (BaseAnnot Top))
         
         
     
@@ -106,9 +110,7 @@ constrain env (A region expr) tipe = do
 
 
       --Variable has annotation that we look up in the environment
-      Var var
-          | name == saveEnvName -> return CSaveEnv
-          | otherwise           -> return (name <? tipe)
+      Var var -> error "TODO variable? Env?"
           where
             name = V.toString var
 
@@ -161,17 +163,18 @@ constrain env (A region expr) tipe = do
       Lambda p e ->
           exists $ \targ ->
           exists $ \tbody -> do
-            fragment <- Pattern.constrain env p targ
+            fragment <- _ --Pattern.constrain env p targ
             --TODO constrain arg types
             c2 <- constrain env e tbody
             --Make sure the argument type is only the patterns matched
-            cMatch <- Pattern.allMatchConstraints env targ region [p]
+            cMatch <- _ --Pattern.allMatchConstraints env targ region [p]
             --TODO adjust this for annotations
-            c <- return $ ex (vars fragment) (clet [monoscheme (typeEnv fragment)]
-                                             ( typeConstraint fragment /\ c2 ))
+            c <- _ -- return $ ex (vars fragment) (clet [monoscheme (typeEnv fragment)]
+                                             --( typeConstraint fragment /\ c2 ))
             fnTy <- makeFn targ tbody
             let retConstr =
-                  typeConstraint fragment /\ cMatch /\ c /\ tipe === fnTy
+                  --TODO fragment
+                  {-typeConstraint fragment /\ -} cMatch /\ c /\ tipe === _ -- fnTy
             return retConstr
 
       --Nothing fancy here: we ensure the function has a function annotation
@@ -209,14 +212,14 @@ constrain env (A region expr) tipe = do
             --t is the type of the expression we match against 
             ce <- constrain env ex texp
             canMatchConstr <-
-                Pattern.allMatchConstraints env texp region (map fst branches)
+                _ --Pattern.allMatchConstraints env texp region (map fst branches)
             --canMatchType <- Pattern.typeForPatList env region (map fst branches)
             let branchConstraints (p,e) =
                   --exists $ \retAnnot -> 
                   exists $ \patType -> do
                     --let recType = _
-                    fragment <- Pattern.constrain  env p patType --texp
-                    letConstr <- clet [toScheme fragment] <$> constrain env e tipe 
+                    fragment <- _ -- Pattern.constrain  env p patType --texp
+                    letConstr <- _ --clet [toScheme fragment] <$> constrain env e tipe 
                     return 
                       $ letConstr  -- /\  tipe === retAnnot --TODO remove?
             joinedBranchConstraints <- mapM branchConstraints branches
@@ -258,9 +261,9 @@ constrain env (A region expr) tipe = do
                  Monad.foldM (constrainDef region env)
                              ([], [], [], Map.empty, true, true)
                              (concatMap expandPattern defs)
-             return $ clet schemes
-                           (clet [Scheme rqs fqs (clet [monoscheme header] c2) header ]
-                                 (c1 /\ c))
+             return $ _ --clet schemes
+                      --     (clet [Scheme rqs fqs (clet [monoscheme header] c2) header ]
+                      --           (c1 /\ c))
 
       --Since our annotations work on records to begin with, we just do record manipulations
       --Like we would for normal typechecking
@@ -270,20 +273,20 @@ constrain env (A region expr) tipe = do
         exists $ \recordType ->
         exists $ \restOfRecord -> do
           recordConstr <- constrain env e recordType 
-          return $ recordConstr /\ (recordType === (directRecord [(label, tipe)] restOfRecord))
+          return $ recordConstr /\ _ --(recordType === (directRecord [(label, tipe)] restOfRecord))
           
       Remove e label ->
         exists $ \originalRecType ->
         exists $ \fieldType -> do
           recordConstr <- constrain env e originalRecType 
-          return $ recordConstr /\ (originalRecType === (directRecord [(label, fieldType)] tipe))
+          return $ recordConstr /\ _ --(originalRecType === (directRecord [(label, fieldType)] tipe))
         
           
       Insert e label value ->
         exists $ \originalRecType ->
         exists $ \newFieldType -> do
           recordConstr <- constrain env e originalRecType 
-          return $ recordConstr /\  (tipe === (directRecord [(label, newFieldType)] originalRecType))
+          return $ recordConstr /\  _ --(tipe === (directRecord [(label, newFieldType)] originalRecType))
 
       Modify e fields ->
         exists $ \originalRecType ->
@@ -291,7 +294,7 @@ constrain env (A region expr) tipe = do
         exists $ \restOfRec -> do
           recordConstr <- constrain env e originalRecType 
           fieldNewTypeConstrs <- forM fields $ \(nm, fexp) -> do
-            newFieldType <- newVar
+            newFieldType <- _ --newVar
             fieldConstr <- constrain env fexp newFieldType 
             return (nm, newFieldType, fieldConstr)
           let fieldTypeConstr = foldr  (\(_,_,c1) c2 -> c1 /\ c2) true fieldNewTypeConstrs
@@ -300,14 +303,14 @@ constrain env (A region expr) tipe = do
           return $
             recordConstr
             /\ fieldTypeConstr
-            /\(tipe === (directRecord fieldTypePairs restOfRec))
+            -- /\(tipe === (directRecord fieldTypePairs restOfRec))
           
       --Recursive: a record with no fields is empty
       --And for a record with fields, we infer the annotation for its field
       --Recursively infer the annotations for the rest of the record
       --And constrain that the result record must have the one field and the rest of the record
       Record fields -> case fields of
-        [] -> return $  tipe === emptyRec
+        [] -> return $  tipe === (BaseAnnot $ PatOther [])
         ((nm,fexp):others) ->
           exists $ \restOfRec ->
           exists $ \fieldType -> do
@@ -316,7 +319,7 @@ constrain env (A region expr) tipe = do
             return $
               fieldConstr
               /\ otherConstr
-              /\ tipe === directRecord [(nm, fieldType)] restOfRec
+              -- /\ tipe === directRecord [(nm, fieldType)] restOfRec
 
 
 
@@ -327,7 +330,8 @@ constrain env (A region expr) tipe = do
 --With the defined variables added to their environment
 --This is also where we close over schemes, since we have Let polymorphism
 --constrainDef :: R.Region -> Env.Environment -> Info -> Canonical.Def
-constrainDef region env info (Canonical.Definition pattern expr maybeTipe) =
+constrainDef region env info (Canonical.Definition pattern expr maybeTipe) = _
+{-
     let qs = [] -- should come from the def, but I'm not sure what would live there...
         (schemes, rigidQuantifiers, flexibleQuantifiers, headers, c2, c1) = info
     in
@@ -348,6 +352,8 @@ constrainDef region env info (Canonical.Definition pattern expr maybeTipe) =
                     , c1 )
 
          _ -> error ("problem in constrainDef with " ++ show pattern)
+-}
+
 
 --Helper function, was in the original Elm code
 expandPattern :: Canonical.Def -> [Canonical.Def]
@@ -372,7 +378,7 @@ constrainCtor region env rawName tipe = trace "DATA one " $ do
               then rawName
               else ("Main." ++ rawName )
         --(arity, cvars, args, result) <- liftIO $ freshDataScheme env (V.toString name)
-        let ctorDict = Env.constructor env
+        let ctorDict =_ -- Env.constructor env
         let theKey =
               if Map.member rawName ctorDict
               then rawName
@@ -384,18 +390,18 @@ constrainCtor region env rawName tipe = trace "DATA one " $ do
                 in if (null possibleKeys)
                       then error $ "Name " ++ (show rawName) ++ " not in dict " ++ show (Map.keys ctorDict)
                       else head possibleKeys
-        (arity,typeVars,_,_) <- liftIO $ Env.get env Env.constructor theKey 
+        (arity,typeVars,_,_) <- _ -- liftIO $ Env.get env Env.constructor theKey 
         doWithArgTypes typeVars theKey arity []
         where
           
-          doWithArgTypes typeVars nm 0 argTypes = exists $ \restOfRecord ->
+          doWithArgTypes typeVars nm 0 argTypes = _ $ \restOfRecord ->
               do
                 let ctorRetType = mkAnnot [("_" ++ nm, argTypes )] restOfRecord
                 ctorAnnotation <- makeCtorType (reverse argTypes) ctorRetType
-                return $ CEqual RErr.None region tipe (ctorAnnotation)
+                return _ -- $ CEqual RErr.None region tipe (ctorAnnotation)
           
           doWithArgTypes typeVars nm arity argTypes =
-            exists $ \t ->
+            _ $ \t ->
               doWithArgTypes typeVars nm (arity - 1) (t:argTypes)
           --Constructor take
           makeCtorType [] ret = return ret

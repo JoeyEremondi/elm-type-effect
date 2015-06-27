@@ -39,14 +39,17 @@ data Annot info =
   | Empty
   | VarAnnot AnnVar
 
-data AnnotScheme info = SchemeAnnot (Annot info) | AnnForAll AnnVar (AnnotScheme info) | AnnTrue
+data AnnotScheme info = SchemeAnnot (Annot info) | AnnForAll AnnVar (AnnotScheme info) 
 
 type AnnEnv info = Map.Map V.Canonical (AnnotScheme info)
 
 --TODO union-find variables?
 newtype AnnVar = AnnVar Int
 
-data AnnConstraint info = Contains (Annot info) (Annot info) | ConstrAnd (AnnConstraint info ) (AnnConstraint info)
+data AnnConstraint info =
+  Contains (Annot info) (Annot info)
+  | ConstrAnd (AnnConstraint info ) (AnnConstraint info)
+  | AnnTrue
 
 --Initialize a pool of variables, returning a source of new variables
 initialVariablePool :: IO (IO AnnVar)
@@ -57,11 +60,23 @@ initialVariablePool = do
     writeIORef nextVar $ retVal + 1
     return $ AnnVar retVal
 
-existsWith :: (IO AnnVar) -> (AnnVar -> IO (Annot info) ) -> IO (Annot info)
+existsWith :: (IO AnnVar) -> (Annot info -> IO (AnnConstraint info) ) -> IO (AnnConstraint info)
 existsWith varSource f = do
   fresh <- varSource
-  f fresh
+  f (VarAnnot fresh)
   
+
+--Info specific to exhaustiveness-analysis
+data PatInfo =
+  PatLambda PatInfo PatInfo
+  | PatData String [PatAnn]
+  | PatOther [PatAnn] --Catch-all case for tuples, records, etc.
+  | Top
+  | NativeAnnot
+
+type PatAnn = Annot PatInfo
+
+type PatAnnEnv = AnnEnv PatInfo
 
 --import Debug.Trace (trace, traceStack)
 trace _ x = x
@@ -75,12 +90,14 @@ subExprType subAnns = mkClosedRecord $ zipWith (\(i::Int) t -> ("_sub" ++ show i
 
 showField (nm, args) = nm ++ " : " ++ (show $ map (TP.pretty TP.App) args)
 
-mkAnnot :: [(String, [Type] )] -> Type -> Type
-mkAnnot fields restOfRecord = trace ("Making record " ++ show (map showField fields )  ) $
-  let
-    recDict = Map.fromList $ map (\(nm,args) -> (nm, [subExprType args]) ) fields
-  in record recDict restOfRecord
+--TODO make tail recursive?
+mkAnnot :: [(String, [PatAnn] )] -> Annot PatInfo -> Annot PatInfo
+mkAnnot fields otherAnnot = case fields of
+  [] -> otherAnnot
+  ((ctor, info) :rest) -> (BaseAnnot $ PatData ctor info ) `AnnotUnion` (mkAnnot rest otherAnnot )
+  
 
+{-
 closedAnnot :: [(String, [Type] )] -> Type
 closedAnnot fields = mkAnnot fields (termN EmptyRecord1)
 
@@ -90,3 +107,4 @@ directRecord fields restOfRecord = trace ("Direct record " ++ show (map (\(f,x) 
     recDict = Map.fromList $ map (\(nm,argTy) -> (nm, [argTy]) ) fields
   in record recDict restOfRecord
 
+-}
