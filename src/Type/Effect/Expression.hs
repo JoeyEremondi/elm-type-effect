@@ -66,10 +66,10 @@ constrain
     -> IO (AnnConstraint PatInfo)
 constrain env (A region expr) tipe = do 
     let --list t = Env.get env Env.types "List" $ t
-        and = ConstrAnd
-        x /\ y = and x y
+        and = foldr ConstrAnd true
+        x /\ y = ConstrAnd x y
         true = AnnTrue
-        t1 === t2 = (t1 `Contains` t2 ) `and` (t2 `Contains` t1)
+        t1 === t2 = (t1 `Contains` t2 ) /\ (t2 `Contains` t1)
         --t1 ==> t2 = error "BAD LAMBDA TODO"--
          --We override this for our fn def
         --x <? t = (CInstance region x t)
@@ -174,7 +174,7 @@ constrain env (A region expr) tipe = do
             fnTy <- makeFn targ tbody
             let retConstr =
                   --TODO fragment
-                  {-typeConstraint fragment /\ -} cMatch /\ c /\ tipe === _ -- fnTy
+                  {-typeConstraint fragment /\ -} cMatch /\ c /\ (tipe === fnTy) -- fnTy
             return retConstr
 
       --Nothing fancy here: we ensure the function has a function annotation
@@ -228,7 +228,7 @@ constrain env (A region expr) tipe = do
             --So we always assume we return top
             --TODO better solution?
             --isTopConstr <- isTop tipe
-            return $ ce /\ canMatchConstr /\ resultConstr /\ tipe === (mkAnnot [("_MYTEST", [] )] restOfRec) -- /\ isTopConstr --TODO more precise?
+            return $ ce /\ canMatchConstr /\ resultConstr -- /\ isTopConstr --TODO more precise?
 
 
       --A Constructor has a function type, accepting any argument

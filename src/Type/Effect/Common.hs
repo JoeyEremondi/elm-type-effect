@@ -68,7 +68,7 @@ existsWith varSource f = do
 
 --Info specific to exhaustiveness-analysis
 data PatInfo =
-  PatLambda PatInfo PatInfo
+  PatLambda PatAnn PatAnn
   | PatData String [PatAnn]
   | PatOther [PatAnn] --Catch-all case for tuples, records, etc.
   | Top
