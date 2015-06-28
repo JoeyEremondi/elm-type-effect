@@ -40,6 +40,7 @@ import Type.Effect.Common as Common
 
 --import Debug.Trace (trace)
 
+trace _ x = x
 
 nativeOps = map (\n -> V.Canonical (V.Module ["Basics"]) n ) [
   "+"
@@ -105,7 +106,7 @@ constrain env (A region expr) tipe = do
 
       --Variable has annotation scheme that we look up in the environment
       Var var ->
-        return $ tipe `InstanceOf` (readEnv name env)
+        _ --return $ tipe `InstanceOf` (readEnv name env)
           where
             name = V.toString var
 
@@ -232,7 +233,7 @@ constrain env (A region expr) tipe = do
       Data rawName [] -> constrainCtor region env rawName tipe
 
       --We treat constructor application with args as a function call
-      Data rawName args -> trace "DATA multi " $ do
+      Data rawName args ->  do
         --let name =
         --      if ('.' `elem` rawName)
         --      then rawName
@@ -317,7 +318,7 @@ constrain env (A region expr) tipe = do
       --Recursively infer the annotations for the rest of the record
       --And constrain that the result record must have the one field and the rest of the record
       Record fields -> case fields of
-        [] -> return $  tipe === (BaseAnnot $ PatOther [])
+        [] -> return $  tipe === (BaseAnnot $ PatRecord Map.empty Empty)
         ((nm,fexp):others) ->
           exists $ \restOfRec ->
           exists $ \fieldType -> do

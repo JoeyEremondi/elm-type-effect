@@ -36,14 +36,17 @@ import Data.Ord (comparing)
 
 import qualified Data.UnionFind.IO as UF
 
+import Control.Applicative
+
 --Generic data type for type annotations
 data Annot info =
   BaseAnnot info
-  -- | Empty
+  | Empty
   | VarAnnot (AnnVar info)
+  | Union (Annot info) (Annot info)
 
 
-data AnnotScheme info = SchemeAnnot (Annot info) | AnnForAll [AnnVar info] (Annot info) 
+data AnnotScheme info = SchemeAnnot (Annot info) | AnnForAll [AnnVar info] (AnnConstraint info ) (Annot info) 
 
 data AnnEnv info =
   AnnEnv
@@ -67,6 +70,7 @@ data AnnConstraint info =
   -- | InstanceOf (Annot info) (AnnotScheme info)
   | AnnTrue
   | OnlyContains (Annot info) (Annot info)
+  | GeneralizedContains (Annot info) (Annot info)
 
 constrNum :: AnnConstraint info -> Int
 constrNum (AnnTrue) = -1
@@ -89,8 +93,10 @@ newVar :: PatAnnEnv -> IO (AnnVar PatInfo)
 newVar env = do
   ret <- readIORef $ ref env
   writeIORef (ref env) (ret + 1)
-  point <- UF.fresh ( PatUnInit)
+  point <- UF.fresh ( patUnInit)
   return $ AnnVar (ret, point)
+
+getUF (AnnVar (_, uf)) = uf
 
 --existsWith :: AnnEnv info -> (Annot info -> IO (AnnConstraint info) ) -> IO (AnnConstraint info)
 existsWith env f = do
@@ -143,10 +149,10 @@ data PatInfo =
   PatLambda PatAnn PatAnn
   | PatData String [PatAnn]
   | PatRecord (Map.Map String PatAnn) PatAnn
-  | PatOther [PatAnn] --TODO need this?
+--  | PatOther [PatAnn] --TODO need this?
   | Top
   | NativeAnnot
-  | PatUnInit
+--  | PatUnInit
   | MultiPat (Map.Map String [PatAnn])
 
 type PatAnn = Annot PatInfo
@@ -155,10 +161,12 @@ type PatAnnEnv = AnnEnv PatInfo
 
 type PatFragment = AnnFragment PatInfo
 
-emptyAnnot = BaseAnnot $ PatOther []
+patUnInit = MultiPat Map.empty
+
+emptyAnnot = Empty --BaseAnnot $ PatOther []
 
 --import Debug.Trace (trace, traceStack)
-trace _ x = x
+
 
 --emptyRec = termN EmptyRecord1
 
@@ -184,27 +192,74 @@ true = AnnTrue
 t1 === t2 = (t1 `Unify` t2 )
 
 --Instantiate a type variable
-instantiate :: PatAnnEnv -> AnnotScheme PatInfo -> IO PatAnn
-instantiate env (SchemeAnnot annot) = return annot
-instantiate env (AnnForAll vars annot) = do
-  newVars <- mapM (\_ -> newVar env ) vars
-  return $ substVars (Map.fromList $ zip vars newVars) annot
+instantiate :: PatAnnEnv -> AnnotScheme PatInfo -> IO (PatAnn, AnnConstraint PatInfo)
+instantiate env (SchemeAnnot annot) = return (annot, true)
+instantiate env (AnnForAll vars constrs annot) = do
+  newVars <- mapM (\_ -> newVar env) vars
+  let foldFun1 ann (oldVar , newVar ) = substVars oldVar newVar ann
+  let foldFun2 c (oldVar , newVar ) = substConstraint oldVar newVar c
+  newAnnot <- foldM foldFun1 annot $ zip vars newVars
+  newConstr <- foldM foldFun2 constrs $ zip vars newVars
+  return (newAnnot, newConstr)
+  
+--substScheme v1 v2 (SchemeAnnot info ) = SchemeAnnot <$> substVars v1 v2 info
+--substScheme v1 v2 (AnnForAll _ scheme) = substScheme v1 v2 scheme
 
-substVars :: Map.Map (AnnVar PatInfo) (AnnVar PatInfo ) -> PatAnn -> PatAnn
-substVars subMap (VarAnnot v) = case Map.lookup v subMap of
-  Nothing -> VarAnnot v
-  (Just v2) -> VarAnnot v2
-substVars subMap (BaseAnnot info) =
-  let self = substVars subMap
-  in BaseAnnot $ case info of
-  (PatLambda x1 x2) -> PatLambda (self x1) (self x2)
-  (PatData x1 x2) -> PatData x1 $ map self x2
-  (PatRecord x1 x2) -> PatRecord (Map.map self x1) (self x2)
-  (PatOther x) -> PatOther $ map self x
-  Top -> Top
-  NativeAnnot -> NativeAnnot
-  PatUnInit -> PatUnInit
-  (MultiPat x) -> MultiPat $ Map.map (map self) x
+substConstraint :: (AnnVar PatInfo) -> (AnnVar PatInfo ) -> AnnConstraint PatInfo -> IO (AnnConstraint PatInfo)
+substConstraint oldVar newVar constr =
+  let
+    sv = substVars oldVar newVar
+    self = substConstraint oldVar newVar
+  in case constr of
+    (Contains x1 x2) -> do
+      sub1 <- sv x1
+      (BaseAnnot sub2) <- sv $ BaseAnnot x2
+      return $ Contains sub1 sub2
+    (Unify x1 x2) -> Unify <$> sv x1 <*> sv x2
+    (ConstrAnd x1 x2) -> ConstrAnd <$> self x1 <*> self x2 
+    AnnTrue -> return AnnTrue
+    (OnlyContains x1 x2) -> OnlyContains <$> sv x1 <*> sv x2
+    (GeneralizedContains x1 x2) -> GeneralizedContains <$> sv x1 <*> sv x2
+
+substVars :: (AnnVar PatInfo) -> (AnnVar PatInfo ) -> PatAnn -> IO PatAnn
+substVars vCurrent vsub (VarAnnot v) = do
+  areSame <- UF.equivalent (getUF vCurrent) (getUF v) 
+  case areSame of
+    False -> return $ VarAnnot v
+    True -> return $ VarAnnot vsub
+substVars vCurrent vsub (BaseAnnot info) = do
+  let self = substVars vCurrent vsub
+  newInfo <- case info of
+    (PatLambda x1 x2) -> PatLambda <$> (self x1) <*> (self x2)
+    (PatData x1 x2) -> (PatData x1) <$> mapM self x2
+    (PatRecord x1 x2) -> do
+      let pairs = Map.toList x1
+      newPairs <- (zip (map fst pairs) ) <$> mapM self (map snd pairs )
+      newX2 <- self x2
+      return $ PatRecord (Map.fromList newPairs) newX2
+    --(PatOther x) -> PatOther <$> mapM self x
+    Top -> return Top
+    NativeAnnot -> return NativeAnnot
+    (MultiPat x) -> do
+      let pairs = Map.toList x
+      let fixPair (k, v) = do
+            newV <- mapM self v
+            return (k, newV)
+      newPairs <- mapM fixPair pairs
+      return $ MultiPat $ Map.fromList newPairs
+  return $ BaseAnnot newInfo
+freeVars :: PatAnn -> [AnnVar PatInfo]
+freeVars (VarAnnot v) = [v] 
+freeVars (BaseAnnot info) =
+  case info of
+    (PatLambda x1 x2) -> (freeVars x1) ++ (freeVars x2)
+    (PatData _ x2) ->  (concatMap freeVars x2)
+    (PatRecord x1 x2) ->  (concatMap freeVars $ Map.elems x1) ++ (freeVars x2)
+    --(PatOther x) ->  concatMap freeVars x
+    Top -> []
+    NativeAnnot -> []
+    --PatUnInit -> []
+    (MultiPat x) ->  concatMap freeVars $ concat $ Map.elems x
 
 
 {-

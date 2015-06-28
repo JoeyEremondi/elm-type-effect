@@ -182,7 +182,7 @@ showLit lit = case lit of
   (Literal.Str s) -> show s
   (Literal.Boolean b) -> show b
 
-
+trace _ x = x
 
 --Group patterns by their constructors, since we might match on more/less specific versions
 sortByCtor :: [P.CanonicalPattern] -> [(String, [[P.CanonicalPattern]])]
