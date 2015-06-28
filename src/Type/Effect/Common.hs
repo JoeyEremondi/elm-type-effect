@@ -44,6 +44,8 @@ import Control.Applicative
 
 import Data.Binary
 
+import Debug.Trace (trace)
+
 --Generic data type for type annotations
 data Annot info =
   BaseAnnot info
@@ -70,7 +72,7 @@ instance Show (AnnVar info) where
   show (AnnVar (x,_)) = show x
 
 instance Read (AnnVar PatInfo) where
-  readsPrec _ s = [(AnnVar (read s, error "Should never use the UF for imported vars"), "")]
+  readsPrec _ (sh:st) =  [(AnnVar ((read [sh] :: Int), error "Should never use the UF for imported vars"), st)]
 
 deriving instance Read (Annot PatInfo)
 deriving instance Read (AnnotScheme PatInfo)

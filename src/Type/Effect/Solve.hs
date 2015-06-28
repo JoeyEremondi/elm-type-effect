@@ -133,7 +133,15 @@ joinPatInfo (PatData str1 fields1) (PatData str2 fields2) =
   if (str1 == str2)
      then MultiPat $ Map.fromList [(str1 , zipWith joinAnnots fields1 fields2)]
   else MultiPat $ Map.fromList [(str1, fields1), (str2, fields2)]
-joinPatInfo _ _ = error "Does not match underlying type system"
-
+joinPatInfo (MultiPat d) info =
+  if Map.null d
+  then info
+  else (error $ "Does not match underlying type system " ++ show (d, info) )
+joinPatInfo i1 i2 = error $ "Does not match underlying type system " ++ show (i1, i2)
+joinPatInfo info (MultiPat d) =
+  if Map.null d
+  then info
+  else (error $ "Does not match underlying type system " ++ show (d, info) )
+joinPatInfo i1 i2 = error $ "Does not match underlying type system " ++ show (i1, i2)
 joinAnnots (BaseAnnot x) (BaseAnnot y) = BaseAnnot (joinPatInfo x y)
 joinAnnots x y = Union x y
