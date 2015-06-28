@@ -107,11 +107,12 @@ type PatAnnEnv = AnnEnv PatInfo
 type PatFragment = AnnFragment PatInfo
 
 
-
+closeEnv :: PatFragment -> AnnConstraint PatInfo -> PatAnnEnv
 closeEnv frag defConstr =
   let
+    fragEnv = typeEnv frag
     schemeConstr = defConstr /\ (typeConstraint frag )
-  in Map.map (closeScheme defConstr)
+  in fragEnv {dict = Map.map (closeScheme defConstr) (dict fragEnv)}  
 
 closeScheme con s@(AnnForAll _ _ _) = s
 closeScheme con (SchemeAnnot ann) =

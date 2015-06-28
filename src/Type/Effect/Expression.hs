@@ -84,9 +84,9 @@ constrainTopLevel env (A region (Let defs body)) topTy = do
                  return $ expConstr /\ canMatchConstr
              --TODO extra pattern match constraints
              let closedEnv = closeEnv frag (Common.and defConstrs)  
-             cbody <- constrain fragEnv body topTy
+             cbody <- constrain closedEnv body topTy
              let constr = cbody /\ (Common.and defConstrs) /\ (typeConstraint frag)
-             return (constr, dict fragEnv)
+             return (constr, dict closedEnv)
 constrain
     :: PatAnnEnv
     -> Canonical.Expr
@@ -295,7 +295,7 @@ constrain env (A region expr) tipe = do
                  return $ expConstr /\ canMatchConstr
              --TODO extra pattern match constraints
              let closedEnv = closeEnv frag (Common.and defConstrs)  
-             cbody <- constrain fragEnv body tipe
+             cbody <- constrain closedEnv body tipe
              return $  cbody /\ (Common.and defConstrs) /\ (typeConstraint frag)
 
       --Since our annotations work on records to begin with, we just do record manipulations
