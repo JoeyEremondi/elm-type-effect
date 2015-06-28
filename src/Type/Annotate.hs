@@ -21,6 +21,7 @@ import qualified Type.Type as T
 import qualified Data.List as List
 
 import qualified Type.Effect.Expression as EfExpr
+import Type.Effect.Common
 import Text.PrettyPrint
 
 import Reporting.Report as Report
@@ -96,10 +97,11 @@ genTotalityConstraints interfaces modul =
                            --TODO is this right?
                            return $ T.varN newVar) oldTypes
 
-      let env = normalEnv {Env.types = Map.fromList $ zip tyNames newTypes }
+      let importEnv = normalEnv {Env.types = Map.fromList $ zip tyNames newTypes }
+      env <- _
+      fvar <- VarAnnot `fmap` newVar env
+      c <-  EfExpr.constrain env (program (body modul)) fvar  
 
-      fvar <- liftIO $ T.variable T.Flexible
-      c <-  EfExpr.constrain env (program (body modul)) (T.varN fvar)  
       
       ctors <-  forM (Map.keys (Env.constructor env)) $ \name -> do
                  (_, vars, args, result) <- liftIO $ Env.freshDataScheme env name

@@ -30,6 +30,7 @@ import qualified AST.Variable as V
 --import Type.Fragment
 import qualified Type.Environment as Env
 import qualified Type.Effect.Literal as Literal
+import Type.Effect.Env
 import qualified Type.Effect.Pattern as Pattern
 
 import qualified Reporting.Error.Type as RErr

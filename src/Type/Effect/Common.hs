@@ -6,6 +6,10 @@ April 17, 2015
 -}
 
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE StandaloneDeriving #-}
+
+
 module Type.Effect.Common where --(mkAnnot, closedAnnot, directRecord, emptyRec) where
 
 import Control.Arrow (second)
@@ -21,8 +25,8 @@ import qualified AST.Variable as V
 import Reporting.PrettyPrint (pretty)
 --import Type.Type
 --import Type.Fragment
-import Type.Environment as Env
-import qualified Type.Constrain.Literal as Literal
+--import Type.Environment as Env
+--import qualified Type.Constrain.Literal as Literal
 
 import qualified Data.List as List
 import qualified Data.UnionFind.IO as UF
@@ -38,21 +42,20 @@ import qualified Data.UnionFind.IO as UF
 
 import Control.Applicative
 
+import Data.Binary
+
 --Generic data type for type annotations
 data Annot info =
   BaseAnnot info
   | Empty
   | VarAnnot (AnnVar info)
   | Union (Annot info) (Annot info)
+  deriving (Eq, Ord, Show)
 
 
-data AnnotScheme info = SchemeAnnot (Annot info) | AnnForAll [AnnVar info] (AnnConstraint info ) (Annot info) 
+data AnnotScheme info = SchemeAnnot (Annot info) | AnnForAll [AnnVar info] (AnnConstraint info ) (Annot info)
+  deriving (Show)
 
-data AnnEnv info =
-  AnnEnv
-  {ref :: (IORef Int),
-   dict :: (Map.Map String (AnnotScheme info)),
-   importedInfo :: Env.Environment}
 
 --TODO union-find variables?
 newtype AnnVar info = AnnVar (Int, UF.Point info)
@@ -63,6 +66,30 @@ instance Eq (AnnVar info) where
 instance Ord (AnnVar info) where
   (AnnVar (x,_)) < (AnnVar (y,_)) = x < y
 
+instance Show (AnnVar info) where
+  show (AnnVar (x,_)) = show x
+
+instance Read (AnnVar PatInfo) where
+  readsPrec _ s = [(AnnVar (read s, error "Should never use the UF for imported vars"), "")]
+
+deriving instance Read (Annot PatInfo)
+deriving instance Read (AnnotScheme PatInfo)
+deriving instance Read (AnnConstraint PatInfo)
+
+readDict :: String -> (Map.Map String (AnnotScheme PatInfo))
+readDict s = read s
+
+{-
+instance Binary PatMatchAnnotations where
+  put = put . show
+  get = readDict <$> (Data.Binary.get :: Get String)
+-}
+annotPut :: PatMatchAnnotations -> Put
+annotPut = put . show --put :: PatMatchAnnotations -> Put
+
+annotGet :: Get PatMatchAnnotations
+annotGet = readDict <$> (Data.Binary.get :: Get String)
+
 data AnnConstraint info =
   Contains (Annot info) info
   | Unify (Annot info) (Annot info)
@@ -71,7 +98,7 @@ data AnnConstraint info =
   | AnnTrue
   | OnlyContains (Annot info) (Annot info)
   | GeneralizedContains (Annot info) (Annot info)
-
+    deriving (Show)
 constrNum :: AnnConstraint info -> Int
 constrNum (AnnTrue) = -1
 constrNum (Unify _ _) = 0
@@ -83,64 +110,7 @@ constrNum (OnlyContains _ _ ) = 3
 orderConstrs :: AnnConstraint info -> AnnConstraint info -> Ordering
 orderConstrs = comparing constrNum
 
---Initialize a pool of variables, returning a source of new variables
-initialEnv :: Env.Environment -> IO (AnnEnv info )
-initialEnv tyEnv = do
-  nextVar <- newIORef (0 :: Int)
-  return $ AnnEnv nextVar (Map.empty) tyEnv
-  
-newVar :: PatAnnEnv -> IO (AnnVar PatInfo)
-newVar env = do
-  ret <- readIORef $ ref env
-  writeIORef (ref env) (ret + 1)
-  point <- UF.fresh ( patUnInit)
-  return $ AnnVar (ret, point)
-
 getUF (AnnVar (_, uf)) = uf
-
---existsWith :: AnnEnv info -> (Annot info -> IO (AnnConstraint info) ) -> IO (AnnConstraint info)
-existsWith env f = do
-  fresh <- newVar env
-  f (VarAnnot fresh)
-
-addAnnToEnv :: String -> (AnnotScheme info) -> AnnEnv info -> AnnEnv info
-addAnnToEnv var ty env = env {dict = Map.insert var ty (dict env)} 
-
-readEnv :: String -> AnnEnv info -> (AnnotScheme info)
-readEnv var env = (dict env) Map.! var
-
-constructor = Env.constructor . importedInfo
-
---TODO avoid code duplication with type fragments?
-data AnnFragment info = AnnFragment
-    { typeEnv :: AnnEnv info
-    , vars :: [AnnVar info]
-    , typeConstraint :: AnnConstraint info
-    }
-
-emptyFragment :: AnnEnv info -> AnnFragment info
-emptyFragment env =
-    AnnFragment (env { dict = Map.empty}) [] AnnTrue
-
-joinFragment :: AnnFragment info -> AnnFragment info -> AnnFragment info
-joinFragment f1 f2 =
-    AnnFragment
-      { typeEnv =
-           let
-             env1 = typeEnv f1
-             env2 = typeEnv f2
-           in env1 { dict = Map.union (dict env1) (dict env2)}
-
-      , vars =
-          vars f1 ++ vars f2
-
-      , typeConstraint =
-          typeConstraint f1 /\ typeConstraint f2
-      }
-
-joinFragments :: AnnEnv info -> [AnnFragment info] -> AnnFragment info
-joinFragments env =
-    List.foldl' (flip joinFragment) $ emptyFragment env
 
       
 
@@ -154,27 +124,15 @@ data PatInfo =
   | NativeAnnot
 --  | PatUnInit
   | MultiPat (Map.Map String [PatAnn])
+  deriving (Show, Read)
 
 type PatAnn = Annot PatInfo
 
-type PatAnnEnv = AnnEnv PatInfo
 
-type PatFragment = AnnFragment PatInfo
 
 patUnInit = MultiPat Map.empty
 
 emptyAnnot = Empty --BaseAnnot $ PatOther []
-
-closeEnv frag defConstr =
-  let
-    schemeConstr = defConstr /\ (typeConstraint frag )
-  in Map.map (closeScheme defConstr)
-
-closeScheme con s@(AnnForAll _ _ _) = s
-closeScheme con (SchemeAnnot ann) =
-  let
-    vars = freeVars ann
-  in AnnForAll vars con ann
 
 --import Debug.Trace (trace, traceStack)
 
@@ -202,76 +160,6 @@ x /\ y = ConstrAnd x y
 true = AnnTrue
 t1 === t2 = (t1 `Unify` t2 )
 
---Instantiate a type variable
-instantiate :: PatAnnEnv -> AnnotScheme PatInfo -> IO (PatAnn, AnnConstraint PatInfo)
-instantiate env (SchemeAnnot annot) = return (annot, true)
-instantiate env (AnnForAll vars constrs annot) = do
-  newVars <- mapM (\_ -> newVar env) vars
-  let foldFun1 ann (oldVar , newVar ) = substVars oldVar newVar ann
-  let foldFun2 c (oldVar , newVar ) = substConstraint oldVar newVar c
-  newAnnot <- foldM foldFun1 annot $ zip vars newVars
-  newConstr <- foldM foldFun2 constrs $ zip vars newVars
-  return (newAnnot, newConstr)
-  
---substScheme v1 v2 (SchemeAnnot info ) = SchemeAnnot <$> substVars v1 v2 info
---substScheme v1 v2 (AnnForAll _ scheme) = substScheme v1 v2 scheme
-
-substConstraint :: (AnnVar PatInfo) -> (AnnVar PatInfo ) -> AnnConstraint PatInfo -> IO (AnnConstraint PatInfo)
-substConstraint oldVar newVar constr =
-  let
-    sv = substVars oldVar newVar
-    self = substConstraint oldVar newVar
-  in case constr of
-    (Contains x1 x2) -> do
-      sub1 <- sv x1
-      (BaseAnnot sub2) <- sv $ BaseAnnot x2
-      return $ Contains sub1 sub2
-    (Unify x1 x2) -> Unify <$> sv x1 <*> sv x2
-    (ConstrAnd x1 x2) -> ConstrAnd <$> self x1 <*> self x2 
-    AnnTrue -> return AnnTrue
-    (OnlyContains x1 x2) -> OnlyContains <$> sv x1 <*> sv x2
-    (GeneralizedContains x1 x2) -> GeneralizedContains <$> sv x1 <*> sv x2
-
-substVars :: (AnnVar PatInfo) -> (AnnVar PatInfo ) -> PatAnn -> IO PatAnn
-substVars vCurrent vsub (VarAnnot v) = do
-  areSame <- UF.equivalent (getUF vCurrent) (getUF v) 
-  case areSame of
-    False -> return $ VarAnnot v
-    True -> return $ VarAnnot vsub
-substVars vCurrent vsub (BaseAnnot info) = do
-  let self = substVars vCurrent vsub
-  newInfo <- case info of
-    (PatLambda x1 x2) -> PatLambda <$> (self x1) <*> (self x2)
-    (PatData x1 x2) -> (PatData x1) <$> mapM self x2
-    (PatRecord x1 x2) -> do
-      let pairs = Map.toList x1
-      newPairs <- (zip (map fst pairs) ) <$> mapM self (map snd pairs )
-      newX2 <- self x2
-      return $ PatRecord (Map.fromList newPairs) newX2
-    --(PatOther x) -> PatOther <$> mapM self x
-    Top -> return Top
-    NativeAnnot -> return NativeAnnot
-    (MultiPat x) -> do
-      let pairs = Map.toList x
-      let fixPair (k, v) = do
-            newV <- mapM self v
-            return (k, newV)
-      newPairs <- mapM fixPair pairs
-      return $ MultiPat $ Map.fromList newPairs
-  return $ BaseAnnot newInfo
-freeVars :: PatAnn -> [AnnVar PatInfo]
-freeVars (VarAnnot v) = [v] 
-freeVars (BaseAnnot info) =
-  case info of
-    (PatLambda x1 x2) -> (freeVars x1) ++ (freeVars x2)
-    (PatData _ x2) ->  (concatMap freeVars x2)
-    (PatRecord x1 x2) ->  (concatMap freeVars $ Map.elems x1) ++ (freeVars x2)
-    --(PatOther x) ->  concatMap freeVars x
-    Top -> []
-    NativeAnnot -> []
-    --PatUnInit -> []
-    (MultiPat x) ->  concatMap freeVars $ concat $ Map.elems x
-
 
 {-
 
@@ -282,3 +170,6 @@ directRecord fields restOfRecord = trace ("Direct record " ++ show (map (\(f,x) 
   in record recDict restOfRecord
 
 -}
+
+
+type PatMatchAnnotations =  (Map.Map String (AnnotScheme PatInfo))

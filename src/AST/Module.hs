@@ -22,6 +22,7 @@ import qualified AST.Variable as Var
 import qualified Elm.Compiler.Version as Compiler
 import qualified Reporting.Annotation as A
 
+import qualified Type.Effect.Common as TypeEffect
 
 -- HELPFUL TYPE ALIASES
 
@@ -33,7 +34,6 @@ type ADTs    = Map.Map String (AdtInfo String)
 
 type AdtInfo v = ( [String], [(v, [Type.Canonical])] )
 type CanonicalAdt = (Var.Canonical, AdtInfo Var.Canonical)
-
 
 -- MODULES
 
@@ -66,7 +66,7 @@ data Module imports exports body = Module
 data CanonicalBody = CanonicalBody
     { program   :: Canonical.Expr
     , types     :: Types
-    , annots    :: Types 
+    , annots    :: TypeEffect.PatMatchAnnotations
     , fixities  :: [(Decl.Assoc, Int, String)]
     , aliases   :: Aliases
     , datatypes :: ADTs
@@ -120,7 +120,7 @@ data Interface = Interface
     { iVersion  :: String
     , iExports  :: [Var.Value]
     , iTypes    :: Types
-    , iAnnots   :: Types
+    , iAnnots   :: TypeEffect.PatMatchAnnotations
     , iImports  :: [Name]
     , iAdts     :: ADTs
     , iAliases  :: Aliases
@@ -144,12 +144,12 @@ toInterface modul =
     }
 
 instance Binary Interface where
-  get = Interface <$> get <*> get <*> get <*> get <*> get <*> get <*> get <*> get <*> get
+  get = Interface <$> get <*> get <*> get <*> TypeEffect.annotGet <*> get <*> get <*> get <*> get <*> get
   put modul = do
       put (iVersion modul)
       put (iExports modul)
       put (iTypes modul)
-      put (iAnnots modul)
+      TypeEffect.annotPut (iAnnots modul)
       put (iImports modul)
       put (iAdts modul)
       put (iAliases modul)

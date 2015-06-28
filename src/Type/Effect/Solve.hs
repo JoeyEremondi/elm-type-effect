@@ -14,7 +14,7 @@ solve env constr = do
         ConstrAnd c1 c2 -> (linearizeConstrs c1) ++ (linearizeConstrs c2)
         AnnTrue -> []
         --Turn instances into unification when we can
-        InstanceOf c1 (SchemeAnnot c2 ) -> [Unify c1 c2]
+        --InstanceOf c1 (SchemeAnnot c2 ) -> [Unify c1 c2]
         _ -> [c]
 
   let orderedConsts = List.sortBy orderConstrs $ linearizeConstrs constr

@@ -35,6 +35,8 @@ import qualified Type.PrettyPrint as TP
 
 import System.IO.Unsafe (unsafePerformIO)
 
+import Type.Effect.Env
+
 --import Debug.Trace (trace)
 --trace _ x = x
 
