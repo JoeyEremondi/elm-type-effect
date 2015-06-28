@@ -123,7 +123,8 @@ addFragToEnv env frag defConstr =
 closeScheme env con s@(AnnForAll _ _ _) = s
 closeScheme env con (SchemeAnnot ann) =
   let
-    vars = occurringVars ann
+    varsToOmit = concatMap freeInScheme $ Map.elems (dict env)
+    vars = (freeIn varsToOmit ann) ++ (freeInConstr varsToOmit con )
   in AnnForAll vars con ann
 
 
@@ -186,6 +187,42 @@ substVars vCurrent vsub (BaseAnnot info) = do
       newPairs <- mapM fixPair pairs
       return $ MultiPat $ Map.fromList newPairs
   return $ BaseAnnot newInfo
+
+freeInScheme :: AnnotScheme PatInfo -> [AnnVar PatInfo]
+freeInScheme (SchemeAnnot ann) = freeIn [] ann
+freeInScheme (AnnForAll vars constr annot) = freeIn vars annot ++ freeInConstr vars constr
+
+freeInConstr :: [AnnVar PatInfo] -> AnnConstraint PatInfo -> [AnnVar PatInfo]
+freeInConstr bound c =
+  let
+    f = freeIn bound
+  in case c of
+    (Contains c1 c2) -> (f c1) ++ (f $ BaseAnnot c2)
+    (Unify c1 c2) -> (f c1) ++ (f c2)
+    (ConstrAnd c1 c2) -> (freeInConstr bound c1) ++ (freeInConstr bound c2)  
+    AnnTrue -> []
+    (OnlyContains c1 c2) -> (f c1) ++ (f c2)
+    (GeneralizedContains c1 c2) -> (f c1) ++ (f c2)
+
+freeIn :: [AnnVar PatInfo] -> PatAnn  -> [AnnVar PatInfo]
+freeIn bound (VarAnnot v) =
+  if v `elem` bound
+  then []
+  else [v]
+freeIn bound Empty = []
+freeIn bound (Union a1 a2) = (freeIn bound a1) ++ (freeIn bound a2)
+freeIn bound (BaseAnnot info)  =
+  let
+    self = freeIn bound
+  in case info of
+    (PatLambda x1 x2) -> (self x1) ++ (self x2)
+    (PatData _ x2) ->  (concatMap self x2)
+    (PatRecord x1 x2) ->  (concatMap self $ Map.elems x1) ++ (self x2)
+    --(PatOther x) ->  concatMap freeVars x
+    Top -> []
+    NativeAnnot -> []
+    --PatUnInit -> []
+    (MultiPat x) ->  concatMap self $ concat $ Map.elems x 
 
 
 occurringVars :: PatAnn -> [AnnVar PatInfo]
