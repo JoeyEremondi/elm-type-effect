@@ -43,7 +43,7 @@ data Annot info =
   | VarAnnot (AnnVar info)
 
 
-data AnnotScheme info = SchemeAnnot (Annot info) | AnnForAll (AnnVar info) (AnnotScheme info) 
+data AnnotScheme info = SchemeAnnot (Annot info) | AnnForAll [AnnVar info] (Annot info) 
 
 data AnnEnv info =
   AnnEnv
@@ -54,19 +54,25 @@ data AnnEnv info =
 --TODO union-find variables?
 newtype AnnVar info = AnnVar (Int, UF.Point info)
 
+instance Eq (AnnVar info) where
+  (AnnVar (x,_)) == (AnnVar (y,_)) = x == y
+
+instance Ord (AnnVar info) where
+  (AnnVar (x,_)) < (AnnVar (y,_)) = x < y
+
 data AnnConstraint info =
   Contains (Annot info) info
   | Unify (Annot info) (Annot info)
   | ConstrAnd (AnnConstraint info ) (AnnConstraint info)
-  | InstanceOf (Annot info) (AnnotScheme info)
+  -- | InstanceOf (Annot info) (AnnotScheme info)
   | AnnTrue
   | OnlyContains (Annot info) (Annot info)
 
 constrNum :: AnnConstraint info -> Int
-constrNum (Unify _ _) = 0
 constrNum (AnnTrue) = -1
-constrNum (Contains _ _) = 1
-constrNum (InstanceOf _ _) = 2
+constrNum (Unify _ _) = 0
+--constrNum (InstanceOf _ _) = 1
+constrNum (Contains _ _) = 2
 constrNum (OnlyContains _ _ ) = 3
 
 --Order for constraints, used in solving
@@ -176,6 +182,30 @@ and = foldr ConstrAnd true
 x /\ y = ConstrAnd x y
 true = AnnTrue
 t1 === t2 = (t1 `Unify` t2 )
+
+--Instantiate a type variable
+instantiate :: PatAnnEnv -> AnnotScheme PatInfo -> IO PatAnn
+instantiate env (SchemeAnnot annot) = return annot
+instantiate env (AnnForAll vars annot) = do
+  newVars <- mapM (\_ -> newVar env ) vars
+  return $ substVars (Map.fromList $ zip vars newVars) annot
+
+substVars :: Map.Map (AnnVar PatInfo) (AnnVar PatInfo ) -> PatAnn -> PatAnn
+substVars subMap (VarAnnot v) = case Map.lookup v subMap of
+  Nothing -> VarAnnot v
+  (Just v2) -> VarAnnot v2
+substVars subMap (BaseAnnot info) =
+  let self = substVars subMap
+  in BaseAnnot $ case info of
+  (PatLambda x1 x2) -> PatLambda (self x1) (self x2)
+  (PatData x1 x2) -> PatData x1 $ map self x2
+  (PatRecord x1 x2) -> PatRecord (Map.map self x1) (self x2)
+  (PatOther x) -> PatOther $ map self x
+  Top -> Top
+  NativeAnnot -> NativeAnnot
+  PatUnInit -> PatUnInit
+  (MultiPat x) -> MultiPat $ Map.map (map self) x
+
 
 {-
 

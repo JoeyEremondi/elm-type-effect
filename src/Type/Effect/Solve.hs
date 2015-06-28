@@ -61,4 +61,3 @@ unifyConstrs (BaseAnnot info1) (BaseAnnot info2) = case (info1, info2) of
   (NativeAnnot, NativeAnnot) -> return []
   _ -> error "Bug in unification for exhaustiveness checking"
 
-
