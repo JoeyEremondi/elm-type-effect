@@ -36,6 +36,7 @@ import Debug.Trace (trace)
 import Type.Inference
 import Type.PrettyPrint
 
+import Type.Effect.Env
 
 showVar t = show $ pretty App t
 
@@ -62,15 +63,15 @@ checkTotality
     -> ([(Region.Region, Warning.Warning)], Map.Map String Type.Canonical)
 checkTotality interfaces modul =
     unsafePerformIO $ do
-        (header, constraint) <-
+        constraint <-
             liftIO (genTotalityConstraints interfaces modul)
-        state <- trace ("\n\n\n********* " ++ showConstr constraint ++ "**************\n\n\n" ) $ Solve.solveToState constraint
+        state <- _
         let warnings = List.foldr (\ ap@(A.A reg p) soFar ->
                                   case p of
                                     Error.Mismatch m -> [(reg, missingCaseWarning m)] ++ soFar
                                     _ -> error ("\nOTHER ERROR " ++ errToString ap )) [] (TS.sError state)
 
-        let header' = Map.delete "::" header
+        let header' = _ --Map.delete "::" header
         let types = Map.map A.drop (Map.difference (TS.sSavedEnv state) header')
 
         retDict <- liftIO (Traverse.traverse T.toSrcType types)
@@ -85,7 +86,7 @@ checkTotality interfaces modul =
 genTotalityConstraints
     :: Interfaces
     -> CanonicalModule
-    ->  IO (Env.TypeDict, T.TypeConstraint)
+    ->  IO (AnnConstraint PatInfo)
 genTotalityConstraints interfaces modul =
   do
       
@@ -100,9 +101,9 @@ genTotalityConstraints interfaces modul =
       let importEnv = normalEnv {Env.types = Map.fromList $ zip tyNames newTypes }
       env <- _
       fvar <- VarAnnot `fmap` newVar env
-      c <-  EfExpr.constrain env (program (body modul)) fvar  
+      EfExpr.constrain env (program (body modul)) fvar  
 
-      
+      {-
       ctors <-  forM (Map.keys (Env.constructor env)) $ \name -> do
                  (_, vars, args, result) <- liftIO $ Env.freshDataScheme env name
                  return (name, (vars, foldr (T.==>) result args))
@@ -114,14 +115,14 @@ genTotalityConstraints interfaces modul =
       let allTypes = concat (ctors : importedVars)
           vars = concatMap (fst . snd) allTypes
           header = Map.map snd (Map.fromList allTypes)
-          environ = T.CLet [ T.Scheme vars [] T.CTrue (Map.map (A.A undefined) header) ]
+          --environ = T.CLet [ T.Scheme vars [] T.CTrue (Map.map (A.A undefined) header) ]
 
-      
-      return (header, environ c)
-
-
+      -}
+      --return (header, c)
 
 
+
+{-
 canonicalizeAnnots
     :: Env.Environment
     -> (Module.Name, Interface)
@@ -130,6 +131,7 @@ canonicalizeAnnots env (moduleName, iface) =
     forM (Map.toList (iAnnots iface)) $ \(name,tipe) ->
         do  tipe' <- Env.instantiateType env tipe Map.empty
             return (Module.nameToString moduleName ++ "." ++ name, tipe')
+-}
 
 missingCaseWarning :: Error.Mismatch ->  Warning.Warning
 missingCaseWarning err = Warning.MissingCase (Error._leftType err ) (Error._rightType err )

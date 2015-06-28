@@ -62,6 +62,31 @@ nativeOps = map (\n -> V.Canonical (V.Module ["Basics"]) n ) [
 makeFn t1 t2 = do
   return $ BaseAnnot $ PatLambda t1 t2 
 
+constrainTopLevel
+    :: PatAnnEnv
+    -> Canonical.Expr
+    -> PatAnn
+    -> IO (AnnConstraint PatInfo, PatMatchAnnotations)
+constrainTopLevel env (A region (Let defs body)) topTy = do
+  --Constrain the pattern of each definition
+             defVars <- forM defs $ \ _ -> VarAnnot <$> newVar env
+             defFrags <- forM (zip defVars defs) $
+                        \ (tp, Canonical.Definition pat _ _ ) ->
+                          Pattern.constrain env pat tp
+             let frag = joinFragments env defFrags
+             let fragEnv = (typeEnv frag)
+             --Constrain each RHS of a definition, giving access to all other defs
+             --This lets us do mutual recursion
+             defConstrs <- forM (zip defVars defs) $
+               \ (tp, Canonical.Definition pat dexp _ ) -> do
+                 expConstr <- constrain fragEnv dexp tp
+                 canMatchConstr <- Pattern.allMatchConstraints fragEnv tp region [pat]
+                 return $ expConstr /\ canMatchConstr
+             --TODO extra pattern match constraints
+             let closedEnv = closeEnv frag (Common.and defConstrs)  
+             cbody <- constrain fragEnv body topTy
+             let constr = cbody /\ (Common.and defConstrs) /\ (typeConstraint frag)
+             return (constr, dict fragEnv)
 constrain
     :: PatAnnEnv
     -> Canonical.Expr
