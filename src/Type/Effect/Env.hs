@@ -118,7 +118,8 @@ addFragToEnv env frag defConstr =
   let
     fragEnv = typeEnv frag
     schemeConstr = defConstr /\ (typeConstraint frag )
-  in error "CLOSE ENV IMP" --fragEnv {dict = Map.map (closeScheme _ schemeConstr) fragEnv}  
+    closedEnv = Map.map ((closeScheme env schemeConstr) . SchemeAnnot ) fragEnv
+  in env {dict = Map.union (dict env) closedEnv}  
 
 closeScheme env con s@(AnnForAll _ _ _) = s
 closeScheme env con (SchemeAnnot ann) =
