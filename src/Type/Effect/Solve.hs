@@ -40,9 +40,10 @@ solve env constr = do
 
   warnings <- concat `fmap` Monad.forM orderedConsts processConstr
 
+  let (keys, vals) = unzip $ Map.toList env
+  newVals <- Monad.forM vals normalizeScheme
   
-  
-  retEnv <- error "TODO get final environment"
+  let retEnv = Map.fromList $ zip keys newVals
   return (retEnv, warnings)
 
 normalize :: PatAnn -> IO PatAnn
@@ -50,11 +51,33 @@ normalize (VarAnnot (AnnVar (_, uf1))) = do
       desc <- UF.descriptor uf1
       BaseAnnot <$> normalizeInfo desc
 normalize (Union a1 a2) = Union <$> (normalize a1) <*> (normalize a2)
-normalize Empty = return empty
+normalize Empty = return Empty
 normalize (BaseAnnot info) = BaseAnnot <$> normalizeInfo info
 
+normalizeScheme :: AnnotScheme PatInfo -> IO (AnnotScheme PatInfo)
+normalizeScheme (SchemeAnnot ann) = SchemeAnnot <$> normalize ann
+normalizeScheme (AnnForAll vars _ ann) = (AnnForAll vars true) <$> normalize ann
+--TODO need to deal with constr? should have already incorporated it
+--into descriptors for variables
+
 normalizeInfo :: PatInfo -> IO PatInfo
-normalizeInfo info = _
+normalizeInfo (PatLambda info1 info2) = PatLambda <$> normalize info1 <*> normalize info2
+normalizeInfo (PatData s subs) = do
+  subNormals <- Monad.forM subs normalize
+  return $ PatData s subNormals
+normalizeInfo (PatRecord fields rest) = do
+  let (keys, vals) = unzip $ Map.toList fields
+  subNormals <- Monad.forM vals normalize
+  let newMap = Map.fromList $ zip (keys) subNormals
+  newRest <- normalize rest
+  return $ PatRecord newMap newRest
+normalizeInfo Top  = return Top
+normalizeInfo NativeAnnot = return  NativeAnnot
+normalizeInfo (MultiPat fields) = do
+  let (keys, vals) = unzip $ Map.toList fields
+  subNormals <- Monad.forM vals (Monad.mapM normalize)
+  let newMap = Map.fromList $ zip keys subNormals
+  return $ MultiPat newMap
 
 --TODO: cases for Empty
 unifyConstrs :: PatAnn -> PatAnn -> IO [(PatInfo, PatInfo )]
