@@ -90,18 +90,18 @@ constrain env (A.A _ pattern) tipe =
     in
     case pattern of
       --No constraints when we match anything, no variables either
-      P.Anything -> return $ emptyFragment env
+      P.Anything -> return $ emptyFragment
 
       --We know the exact value of a literal
       P.Literal lit -> do
           c <- constrainLiteral env lit tipe
-          return $ (emptyFragment env) { typeConstraint = c }
+          return $ (emptyFragment) { typeConstraint = c }
 
       --Variable: could have any annotations, so use a fresh typeVar
       P.Var name -> do
           v <- newVar env
           return $ AnnFragment {
-              typeEnv    = env {dict = Map.singleton name (SchemeAnnot $ VarAnnot v)},
+              typeEnv    =  Map.singleton name (VarAnnot v) ,
               vars       = [v],
               typeConstraint = VarAnnot v === tipe
           }
@@ -114,8 +114,8 @@ constrain env (A.A _ pattern) tipe =
           fragment <- constrain env p tipe
           --TODO this case? Constrain alias?
           return $ fragment
-            { typeEnv = env {dict = Map.insert name (SchemeAnnot varType) (dict $ typeEnv fragment) }
-             , vars    = v : vars fragment
+            { typeEnv = Map.insert name (varType) (typeEnv fragment) 
+             , vars    = v : (vars fragment)
             , typeConstraint = (VarAnnot v === tipe) /\ typeConstraint fragment
             }
 
@@ -125,7 +125,7 @@ constrain env (A.A _ pattern) tipe =
           --TODO is this the right args?
           (kind, cvars, args, result) <- liftIO $ Env.freshDataScheme (importedInfo env) (V.toString name)
           argTypes <- mapM (\_ -> VarAnnot <$> newVar env) args
-          fragment <- (joinFragments env ) <$> Monad.zipWithM (constrain env) patterns argTypes
+          fragment <- (joinFragments ) <$> Monad.zipWithM (constrain env) patterns argTypes
           --return fragment --TODO right?
           --We don't constrain at all here, since we already did the pattern match check
           --TODO let-expression for special cases?
@@ -138,7 +138,7 @@ constrain env (A.A _ pattern) tipe =
                    tipe `Contains` ( PatData ("_" ++ V.toString name) argAnnotVars )
              
              argTypesFrags <- mapM (\(pat, t) -> constrain env pat t) $ zip patterns argAnnotVars
-             let argTypesFrag = joinFragments env argTypesFrags 
+             let argTypesFrag = joinFragments argTypesFrags 
              let argTypesConstr = typeConstraint argTypesFrag
              return $ ctorFieldConstr /\ argTypesConstr
              --genSubTypeConstr tipe args 1 $ A.A region CTrue
@@ -154,7 +154,7 @@ constrain env (A.A _ pattern) tipe =
           let tenv = Map.map VarAnnot $ Map.fromList pairs
           let c =  (tipe === (BaseAnnot $ PatRecord tenv emptyAnnot )) --record (Map.map (:[]) tenv) t
           return $ AnnFragment {
-              typeEnv        = env {dict = Map.map (SchemeAnnot) tenv},
+              typeEnv        = tenv  ,
               vars           = map snd pairs,
               typeConstraint = c
           }

@@ -1,7 +1,7 @@
 module Parse.Helpers where
 
 import Prelude hiding (until)
-import Control.Applicative ((<$>),(<*>))
+import Control.Applicative ((<$>),(<*>),(<*))
 import Control.Monad (guard, join)
 import Control.Monad.State (State)
 import Data.Char (isUpper)
@@ -101,7 +101,7 @@ makeVar firstChar =
 
 reserved :: String -> IParser String
 reserved word =
-  expecting ("reserved word '" ++ word ++ "'") $
+  expecting ("reserved word `" ++ word ++ "`") $
     do  string word
         notFollowedBy innerVarChar
         return word
@@ -390,7 +390,7 @@ docComment =
 
 multiComment :: IParser String
 multiComment =
-  (++) <$> try (string "{-") <*> closeComment
+  (++) <$> try (string "{-" <* notFollowedBy (string "|")) <*> closeComment
 
 
 closeComment :: IParser String
@@ -437,6 +437,7 @@ ignoreUntil end =
       choice
         [ try (ignore chr) <|> ignore str
         , ignore multiComment
+        , ignore docComment
         , ignore anyChar
         ]
 

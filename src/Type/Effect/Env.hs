@@ -62,20 +62,22 @@ addAnnToEnv :: String -> (AnnotScheme info) -> AnnEnv info -> AnnEnv info
 addAnnToEnv var ty env = env {dict = Map.insert var ty (dict env)} 
 
 readEnv :: String -> AnnEnv info -> (AnnotScheme info)
-readEnv var env = (dict env) Map.! var
+readEnv var env = case Map.lookup var (dict env) of
+  Nothing -> error $ "Variable " ++ var ++ " not in env " ++ (show $ Map.keys $ dict env )
+  Just x -> x
 
 constructor = Env.constructor . importedInfo
 
 --TODO avoid code duplication with type fragments?
 data AnnFragment info = AnnFragment
-    { typeEnv :: AnnEnv info
+    { typeEnv :: (Map.Map String (Annot info))
     , vars :: [AnnVar info]
     , typeConstraint :: AnnConstraint info
     }
 
-emptyFragment :: AnnEnv info -> AnnFragment info
-emptyFragment env =
-    AnnFragment (env { dict = Map.empty}) [] AnnTrue
+emptyFragment :: AnnFragment info
+emptyFragment =
+    AnnFragment Map.empty [] AnnTrue
 
 joinFragment :: AnnFragment info -> AnnFragment info -> AnnFragment info
 joinFragment f1 f2 =
@@ -84,7 +86,7 @@ joinFragment f1 f2 =
            let
              env1 = typeEnv f1
              env2 = typeEnv f2
-           in env1 { dict = Map.union (dict env1) (dict env2)}
+           in Map.union env1 env2
 
       , vars =
           vars f1 ++ vars f2
@@ -93,9 +95,9 @@ joinFragment f1 f2 =
           typeConstraint f1 /\ typeConstraint f2
       }
 
-joinFragments :: AnnEnv info -> [AnnFragment info] -> AnnFragment info
-joinFragments env =
-    List.foldl' (flip joinFragment) $ emptyFragment env
+joinFragments :: [AnnFragment info] -> AnnFragment info
+joinFragments =
+    List.foldl' (flip joinFragment) $ emptyFragment
 
 
 
@@ -106,18 +108,22 @@ type PatAnnEnv = AnnEnv PatInfo
 
 type PatFragment = AnnFragment PatInfo
 
+--"Temporary:" add the variables of a fragment to a type-env
+--This lets us generate constraints for recursive definitions
+tempAddFrag :: PatAnnEnv -> PatFragment -> PatAnnEnv
+tempAddFrag env frag = env {dict = Map.union (dict env) (Map.map SchemeAnnot $ typeEnv frag)}
 
-closeEnv :: PatFragment -> AnnConstraint PatInfo -> PatAnnEnv
-closeEnv frag defConstr =
+addFragToEnv :: PatAnnEnv -> PatFragment -> AnnConstraint PatInfo -> PatAnnEnv
+addFragToEnv env frag defConstr =
   let
     fragEnv = typeEnv frag
     schemeConstr = defConstr /\ (typeConstraint frag )
-  in fragEnv {dict = Map.map (closeScheme defConstr) (dict fragEnv)}  
+  in error "CLOSE ENV IMP" --fragEnv {dict = Map.map (closeScheme _ schemeConstr) fragEnv}  
 
-closeScheme con s@(AnnForAll _ _ _) = s
-closeScheme con (SchemeAnnot ann) =
+closeScheme env con s@(AnnForAll _ _ _) = s
+closeScheme env con (SchemeAnnot ann) =
   let
-    vars = freeVars ann
+    vars = occurringVars ann
   in AnnForAll vars con ann
 
 
@@ -180,18 +186,20 @@ substVars vCurrent vsub (BaseAnnot info) = do
       newPairs <- mapM fixPair pairs
       return $ MultiPat $ Map.fromList newPairs
   return $ BaseAnnot newInfo
-freeVars :: PatAnn -> [AnnVar PatInfo]
-freeVars (VarAnnot v) = [v] 
-freeVars (BaseAnnot info) =
+
+
+occurringVars :: PatAnn -> [AnnVar PatInfo]
+occurringVars (VarAnnot v) = [v] 
+occurringVars (BaseAnnot info) =
   case info of
-    (PatLambda x1 x2) -> (freeVars x1) ++ (freeVars x2)
-    (PatData _ x2) ->  (concatMap freeVars x2)
-    (PatRecord x1 x2) ->  (concatMap freeVars $ Map.elems x1) ++ (freeVars x2)
+    (PatLambda x1 x2) -> (occurringVars x1) ++ (occurringVars x2)
+    (PatData _ x2) ->  (concatMap occurringVars x2)
+    (PatRecord x1 x2) ->  (concatMap occurringVars $ Map.elems x1) ++ (occurringVars x2)
     --(PatOther x) ->  concatMap freeVars x
     Top -> []
     NativeAnnot -> []
     --PatUnInit -> []
-    (MultiPat x) ->  concatMap freeVars $ concat $ Map.elems x
+    (MultiPat x) ->  concatMap occurringVars $ concat $ Map.elems x
 
 --existsWith :: AnnEnv info -> (Annot info -> IO (AnnConstraint info) ) -> IO (AnnConstraint info)
 existsWith env f = do

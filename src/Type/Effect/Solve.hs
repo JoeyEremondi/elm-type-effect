@@ -9,6 +9,8 @@ import qualified Data.UnionFind.IO as UF
 import qualified Control.Monad as Monad
 import qualified Data.Map as Map
 
+import Control.Applicative
+
 solve :: PatMatchAnnotations -> AnnConstraint PatInfo -> IO (PatMatchAnnotations, [(PatInfo, PatInfo )])
 solve env constr = do
   let linearizeConstrs c = case c of
@@ -32,10 +34,27 @@ solve env constr = do
             return []
           Contains (BaseAnnot info1) info2 -> 
             error "TODO manual check if contained"
-  
+          OnlyContains _ _ -> return []
+          GeneralizedContains _ _ -> return []
+
+
   warnings <- concat `fmap` Monad.forM orderedConsts processConstr
+
+  
+  
   retEnv <- error "TODO get final environment"
   return (retEnv, warnings)
+
+normalize :: PatAnn -> IO PatAnn
+normalize (VarAnnot (AnnVar (_, uf1))) = do
+      desc <- UF.descriptor uf1
+      BaseAnnot <$> normalizeInfo desc
+normalize (Union a1 a2) = Union <$> (normalize a1) <*> (normalize a2)
+normalize Empty = return empty
+normalize (BaseAnnot info) = BaseAnnot <$> normalizeInfo info
+
+normalizeInfo :: PatInfo -> IO PatInfo
+normalizeInfo info = _
 
 --TODO: cases for Empty
 unifyConstrs :: PatAnn -> PatAnn -> IO [(PatInfo, PatInfo )]

@@ -26,8 +26,13 @@ header =
   do  optional freshLine
       (names, exports) <-
           option (["Main"], Var.openListing) (moduleDecl `followedBy` freshLine)
+      docs <-
+        choice
+          [ addLocation (Just <$> docComment) `followedBy` freshLine
+          , addLocation (return Nothing)
+          ]
       imports' <- imports
-      return (Module.Header names exports imports')
+      return (Module.Header names docs exports imports')
 
 
 moduleDecl :: IParser ([String], Var.Listing (A.Located Var.Value))
@@ -67,7 +72,7 @@ import' =
     as' moduleName =
       do  try (whitespace >> reserved "as")
           whitespace
-          capVar <?> ("an alias for module '" ++ moduleName ++ "'")
+          capVar <?> ("an alias for module `" ++ moduleName ++ "`")
 
     exposing :: IParser (Var.Listing Var.Value)
     exposing =

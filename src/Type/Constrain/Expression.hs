@@ -27,9 +27,8 @@ constrain
     -> Canonical.Expr
     -> Type
     -> IO TypeConstraint
-constrain env (A.A region expression) tipe =
+constrain env annotatedExpr@(A.A region expression) tipe =
     let list t = Env.get env Env.types "List" <| t
-        (===) = CEqual Error.None region
         (<?) = CInstance region
     in
     case expression of
@@ -57,7 +56,7 @@ constrain env (A.A region expression) tipe =
                 uniform = makeRec Lit.uniform unif
                 varying = makeRec Lit.varying (termN EmptyRecord1)
             in
-                return (tipe === shaderTipe attribute uniform varying)
+                return (CEqual Error.Shader region tipe (shaderTipe attribute uniform varying))
 
       E.Var var ->
           let name = V.toString var
@@ -68,7 +67,11 @@ constrain env (A.A region expression) tipe =
           existsNumber $ \n ->
               do  lowCon <- constrain env lowExpr n
                   highCon <- constrain env highExpr n
-                  return $ CAnd [lowCon, highCon, list n === tipe]
+                  return $ CAnd
+                    [ lowCon
+                    , highCon
+                    , CEqual Error.Range region (list n) tipe
+                    ]
 
       E.ExplicitList exprs ->
           constrainList env region exprs tipe
@@ -86,27 +89,13 @@ constrain env (A.A region expression) tipe =
                             (CLet [monoscheme (Fragment.typeEnv fragment)]
                                   (Fragment.typeConstraint fragment /\ bodyCon)
                             )
-                  return $ con /\ tipe === (argType ==> resType)
+                  return $ con /\ CEqual Error.Lambda region tipe (argType ==> resType)
 
-      E.App func@(A.A funcRegion _) arg@(A.A argRegion _) ->
-          do  argVar <- variable Flexible
-              argCon <- constrain env arg (varN argVar)
-
-              funcVar <- variable Flexible
-              funcCon <- constrain env func (varN funcVar)
-
-              argVar' <- variable Flexible
-              resultVar <- variable Flexible
-
-              return $ ex [argVar,argVar',resultVar] $ CAnd $
-                [ argCon
-                , funcCon
-                , CEqual (Error.ExtraArgument funcRegion) region
-                    (varN funcVar)
-                    (varN argVar' ==> varN resultVar)
-                , CEqual (Error.BadArgument argRegion) region (varN argVar') (varN argVar)
-                , tipe === varN resultVar
-                ]
+      E.App _ _ ->
+          let
+            (f:args) = E.collectApps annotatedExpr
+          in
+            constrainApp env region f args tipe
 
       E.MultiIf branches ->
           constrainIf env region branches tipe
@@ -139,7 +128,11 @@ constrain env (A.A region expression) tipe =
                   recordCon <- constrain env expr recordType
                   let newRecordType =
                         record (Map.singleton label [valueType]) recordType
-                  return (CAnd [valueCon, recordCon, tipe === newRecordType])
+                  return $ CAnd
+                    [ valueCon
+                    , recordCon
+                    , CEqual Error.Record region tipe newRecordType
+                    ]
 
       E.Modify expr fields ->
           exists $ \t ->
@@ -149,7 +142,7 @@ constrain env (A.A region expression) tipe =
 
                   newVars <- Monad.forM fields $ \_ -> variable Flexible
                   let newFields = ST.fieldMap (zip (map fst fields) (map varN newVars))
-                  let cNew = tipe === record newFields t
+                  let cNew = CEqual Error.Record region tipe (record newFields t)
 
                   cs <- Monad.zipWithM (constrain env) (map snd fields) (map varN newVars)
 
@@ -164,7 +157,7 @@ constrain env (A.A region expression) tipe =
                       (map varN vars)
               let fields' = ST.fieldMap (zip (map fst fields) (map varN vars))
               let recordType = record fields' (termN EmptyRecord1)
-              return (ex vars (CAnd (fieldCons ++ [tipe === recordType])))
+              return (ex vars (CAnd (fieldCons ++ [CEqual Error.Record region tipe recordType])))
 
       E.Let defs body ->
           do  bodyCon <- constrain env body tipe
@@ -190,6 +183,89 @@ constrain env (A.A region expression) tipe =
 
             E.Task _ expr _ ->
                 constrain env expr tipe
+
+
+-- CONSTRAIN APP
+
+constrainApp
+    :: Env.Environment
+    -> R.Region
+    -> Canonical.Expr
+    -> [Canonical.Expr]
+    -> Type
+    -> IO TypeConstraint
+constrainApp env region f args tipe =
+  do  funcVar <- variable Flexible
+      funcCon <- constrain env f (varN funcVar)
+
+      (vars, argCons, numberOfArgsCons, argMatchCons, _, returnVar) <-
+          argConstraints env maybeName region (length args) funcVar 1 args
+
+      let returnCon =
+            CEqual (Error.Function maybeName) region (varN returnVar) tipe
+
+      return $ ex (funcVar : vars) $
+        CAnd (funcCon : argCons ++ numberOfArgsCons ++ argMatchCons ++ [returnCon])
+  where
+    maybeName =
+      case f of
+        A.A _ (E.Var canonicalName) ->
+            Just canonicalName
+
+        _ ->
+          Nothing
+
+
+argConstraints
+    :: Env.Environment
+    -> Maybe V.Canonical
+    -> R.Region
+    -> Int
+    -> Variable
+    -> Int
+    -> [Canonical.Expr]
+    -> IO ([Variable], [TypeConstraint], [TypeConstraint], [TypeConstraint], Maybe R.Region, Variable)
+argConstraints env name region totalArgs overallVar index args =
+  case args of
+    [] ->
+      return ([], [], [], [], Nothing, overallVar)
+
+    expr@(A.A subregion _) : rest ->
+      do  argVar <- variable Flexible
+          argCon <- constrain env expr (varN argVar)
+          argIndexVar <- variable Flexible
+          localReturnVar <- variable Flexible
+
+          (vars, argConRest, numberOfArgsRest, argMatchRest, restRegion, returnVar) <-
+              argConstraints env name region totalArgs localReturnVar (index + 1) rest
+
+          let arityRegion =
+                maybe subregion (R.merge subregion) restRegion
+
+          let numberOfArgsCon =
+                CEqual
+                  (Error.FunctionArity name (index - 1) totalArgs arityRegion)
+                  region
+                  (varN argIndexVar ==> varN localReturnVar)
+                  (varN overallVar)
+
+          let argMatchCon =
+                CEqual
+                  (Error.UnexpectedArg name index subregion)
+                  region
+                  (varN argIndexVar)
+                  (varN argVar)
+
+          return
+            ( argVar : argIndexVar : localReturnVar : vars
+            , argCon : argConRest
+            , numberOfArgsCon : numberOfArgsRest
+            , argMatchCon : argMatchRest
+            , Just arityRegion
+            , returnVar
+            )
+
+
 
 
 -- CONSTRAIN BINOP

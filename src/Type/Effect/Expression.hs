@@ -73,19 +73,19 @@ constrainTopLevel env (A region (Let defs body)) topTy = do
              defFrags <- forM (zip defVars defs) $
                         \ (tp, Canonical.Definition pat _ _ ) ->
                           Pattern.constrain env pat tp
-             let frag = joinFragments env defFrags
+             let frag = joinFragments defFrags
              let fragEnv = (typeEnv frag)
              --Constrain each RHS of a definition, giving access to all other defs
              --This lets us do mutual recursion
              defConstrs <- forM (zip defVars defs) $
                \ (tp, Canonical.Definition pat dexp _ ) -> do
-                 expConstr <- constrain fragEnv dexp tp
-                 canMatchConstr <- Pattern.allMatchConstraints fragEnv tp region [pat]
+                 expConstr <- constrain (tempAddFrag env frag) dexp tp
+                 canMatchConstr <- Pattern.allMatchConstraints (tempAddFrag env frag) tp region [pat]
                  return $ expConstr /\ canMatchConstr
              --TODO extra pattern match constraints
-             let closedEnv = closeEnv frag (Common.and defConstrs)  
-             cbody <- constrain closedEnv body topTy
-             let constr = cbody /\ (Common.and defConstrs) /\ (typeConstraint frag)
+             let closedEnv = addFragToEnv env frag (Common.and defConstrs)  
+             --cbody <- constrain closedEnv body topTy
+             let constr = (Common.and defConstrs) /\ (typeConstraint frag)
              return (constr, dict closedEnv)
 constrain
     :: PatAnnEnv
@@ -189,7 +189,7 @@ constrain env (A region expr) tipe = do
           exists $ \tbody -> do
             fragment <- Pattern.constrain env p targ
             --TODO constrain arg types
-            c2 <- constrain (typeEnv fragment) e tbody
+            c2 <- constrain (addFragToEnv env fragment true) e tbody
             --Make sure the argument type is only the patterns matched
             cMatch <- Pattern.allMatchConstraints env targ region [p]
             --TODO adjust this for annotations
@@ -242,7 +242,7 @@ constrain env (A region expr) tipe = do
                   exists $ \patType -> do
                     --let recType = _
                     fragment <- Pattern.constrain  env p patType --texp
-                    letConstr <- constrain (typeEnv fragment) e tipe 
+                    letConstr <- constrain (tempAddFrag env fragment) e tipe 
                     return 
                       $ letConstr --  /\  tipe `Contains` retAnnot --TODO remove?
             allBranchConstraints <- mapM branchConstraints branches
@@ -284,17 +284,17 @@ constrain env (A region expr) tipe = do
              defFrags <- forM (zip defVars defs) $
                         \ (tp, Canonical.Definition pat _ _ ) ->
                           Pattern.constrain env pat tp
-             let frag = joinFragments env defFrags
+             let frag = joinFragments defFrags
              let fragEnv = (typeEnv frag)
              --Constrain each RHS of a definition, giving access to all other defs
              --This lets us do mutual recursion
              defConstrs <- forM (zip defVars defs) $
                \ (tp, Canonical.Definition pat dexp _ ) -> do
-                 expConstr <- constrain fragEnv dexp tp
-                 canMatchConstr <- Pattern.allMatchConstraints fragEnv tp region [pat]
+                 expConstr <- constrain (tempAddFrag env frag ) dexp tp
+                 canMatchConstr <- Pattern.allMatchConstraints (tempAddFrag env frag ) tp region [pat]
                  return $ expConstr /\ canMatchConstr
              --TODO extra pattern match constraints
-             let closedEnv = closeEnv frag (Common.and defConstrs)  
+             let closedEnv = addFragToEnv env frag (Common.and defConstrs)  
              cbody <- constrain closedEnv body tipe
              return $  cbody /\ (Common.and defConstrs) /\ (typeConstraint frag)
 
