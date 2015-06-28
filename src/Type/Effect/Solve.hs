@@ -1,6 +1,7 @@
-module Type.Effec.Solve where
+module Type.Effect.Solve where
 
 import Type.Effect.Common as Common
+import Type.Effect.Env as Env
 import qualified Data.List as List
 
 import qualified Data.UnionFind.IO as UF
@@ -8,7 +9,7 @@ import qualified Data.UnionFind.IO as UF
 import qualified Control.Monad as Monad
 import qualified Data.Map as Map
 
-solve :: PatAnnEnv -> AnnConstraint PatInfo -> IO [String]
+solve :: PatMatchAnnotations -> AnnConstraint PatInfo -> IO (PatMatchAnnotations, [(PatInfo, PatInfo )])
 solve env constr = do
   let linearizeConstrs c = case c of
         ConstrAnd c1 c2 -> (linearizeConstrs c1) ++ (linearizeConstrs c2)
@@ -32,11 +33,12 @@ solve env constr = do
           Contains (BaseAnnot info1) info2 -> 
             error "TODO manual check if contained"
   
-  concat `fmap` Monad.forM orderedConsts processConstr
-
+  warnings <- concat `fmap` Monad.forM orderedConsts processConstr
+  retEnv <- error "TODO get final environment"
+  return (retEnv, warnings)
 
 --TODO: cases for Empty
-unifyConstrs :: PatAnn -> PatAnn -> IO [String]
+unifyConstrs :: PatAnn -> PatAnn -> IO [(PatInfo, PatInfo )]
 unifyConstrs (VarAnnot (AnnVar (_, uf1))) (VarAnnot (AnnVar (_, uf2))) = do
     UF.union uf1 uf2
     return []

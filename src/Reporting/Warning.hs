@@ -15,13 +15,15 @@ import qualified Reporting.Report as Report
 
 import qualified Data.List as List
 
+import qualified Type.Effect.Common as TypeEffect
+
 
 -- ALL POSSIBLE WARNINGS
 
 data Warning
     = UnusedImport Module.Name
     | MissingTypeAnnotation String Type.Canonical
-    | MissingCase Type.Canonical Type.Canonical
+    | MissingCase TypeEffect.PatInfo TypeEffect.PatInfo
 
 -- TO STRING
 
@@ -35,16 +37,14 @@ print dealiaser location source (A.A region warning) =
     Report.printWarning location region (toReport dealiaser warning) source
 
 
-findMissingCases :: P.Dealiaser -> Type.Canonical -> Type.Canonical -> String
-findMissingCases dealiaser t1 t2 = case (t1, t2) of
-   (Type.Record fields1 _, Type.Record fields2 _) ->
-     List.intercalate ", " $  [ (tail s) | (s, _) <- fields1, not (s `elem` (map fst fields2) ) ]
-   _ -> "ERROR: Bug in Exhaustiveness checker"
+findMissingCases :: P.Dealiaser -> TypeEffect.PatInfo -> TypeEffect.PatInfo -> String
+findMissingCases dealiaser t1 t2 = show t1 ++ "\n*******\n" ++ show t2 --TODO fancier?
 
-typeToMatchedCases dealiaser (Type.Record fields _) = List.intercalate ", " (map (tail . fst) fields)
+typeToMatchedCases dealiaser info = "TODO typeToMatchedCases" -- List.intercalate ", " (map (tail . fst) fields)
 
 needsTop t = case t of
-  Type.Record fields _ -> not $ null $ filter (\(x,_) -> x == "__Top" || x == "Lambda") fields
+  TypeEffect.Top -> True
+  --Type.Record fields _ -> not $ null $ filter (\(x,_) -> x == "__Top" || x == "Lambda") fields
   _ -> False
 
 toReport :: P.Dealiaser -> Warning -> Report.Report

@@ -14,8 +14,8 @@ import qualified Reporting.Error.Type as Error
 import qualified Reporting.Warning as Warning
 import qualified Type.Constrain.Expression as TcExpr
 import qualified Type.Environment as Env
-import qualified Type.Solve as Solve
-import qualified Type.State as TS
+--import qualified Type.Solve as Solve
+--import qualified Type.State as TS
 import qualified Type.Type as T
 
 import qualified Data.List as List
@@ -37,6 +37,7 @@ import Type.Inference
 import Type.PrettyPrint
 
 import Type.Effect.Env
+import Type.Effect.Solve
 
 showVar t = show $ pretty App t
 
@@ -63,16 +64,17 @@ checkTotality
     -> ([(Region.Region, Warning.Warning)], Map.Map String Type.Canonical)
 checkTotality interfaces modul =
     unsafePerformIO $ do
-        constraint <-
+        (constraint, envDict, header) <-
             liftIO (genTotalityConstraints interfaces modul)
-        state <- _
-        let warnings = List.foldr (\ ap@(A.A reg p) soFar ->
-                                  case p of
-                                    Error.Mismatch m -> [(reg, missingCaseWarning m)] ++ soFar
-                                    _ -> error ("\nOTHER ERROR " ++ errToString ap )) [] (TS.sError state)
+        (finalEnv, rawWarnings) <- solve envDict constraint
+        let warnings =  map missingCaseWarning rawWarnings
+        --let warnings = List.foldr (\ ap@(A.A reg p) soFar ->
+        --                          case p of
+        --                            Error.Mismatch m -> [(reg, missingCaseWarning m)] ++ soFar
+        --                            _ -> error ("\nOTHER ERROR " ++ errToString ap )) [] (TS.sError state)
 
-        let header' = _ --Map.delete "::" header
-        let types = Map.map A.drop (Map.difference (TS.sSavedEnv state) header')
+        let header' = Map.delete "::" header
+        let types = Map.map A.drop (Map.difference (error "TODO get final env from Solver" ) header')
 
         retDict <- liftIO (Traverse.traverse T.toSrcType types)
         return $ trace (show retDict ) $ (warnings, retDict)
@@ -86,11 +88,12 @@ checkTotality interfaces modul =
 genTotalityConstraints
     :: Interfaces
     -> CanonicalModule
-    ->  IO (AnnConstraint PatInfo)
+    ->  IO (AnnConstraint PatInfo, PatMatchAnnotations, PatMatchAnnotations)
 genTotalityConstraints interfaces modul =
   do
       
       normalEnv <- Env.initialEnvironment (canonicalizeAdts interfaces modul)
+      let annotDict = foldl canonicalizeAnnots Map.empty $ Map.toList interfaces
       let (tyNames, oldTypes) = unzip $ Map.toList $ Env.types normalEnv
       newTypes <- mapM (\_ ->
                         do
@@ -99,10 +102,11 @@ genTotalityConstraints interfaces modul =
                            return $ T.varN newVar) oldTypes
 
       let importEnv = normalEnv {Env.types = Map.fromList $ zip tyNames newTypes }
-      env <- _
+      emptyEnv <- initialEnv normalEnv
+      let env = emptyEnv {dict = annotDict}
       fvar <- VarAnnot `fmap` newVar env
-      EfExpr.constrain env (program (body modul)) fvar  
-
+      (constr, topEnv ) <-EfExpr.constrainTopLevel env (program (body modul)) fvar  
+      return (constr, topEnv, annotDict)
       {-
       ctors <-  forM (Map.keys (Env.constructor env)) $ \name -> do
                  (_, vars, args, result) <- liftIO $ Env.freshDataScheme env name
@@ -122,16 +126,18 @@ genTotalityConstraints interfaces modul =
 
 
 
-{-
-canonicalizeAnnots
-    :: Env.Environment
-    -> (Module.Name, Interface)
-    ->  IO [(String, ([T.Variable], T.Type))]
-canonicalizeAnnots env (moduleName, iface) =
-    forM (Map.toList (iAnnots iface)) $ \(name,tipe) ->
-        do  tipe' <- Env.instantiateType env tipe Map.empty
-            return (Module.nameToString moduleName ++ "." ++ name, tipe')
--}
 
-missingCaseWarning :: Error.Mismatch ->  Warning.Warning
-missingCaseWarning err = Warning.MissingCase (Error._leftType err ) (Error._rightType err )
+canonicalizeAnnots
+    :: PatMatchAnnotations
+    -> (Module.Name, Interface)
+    ->  PatMatchAnnotations
+canonicalizeAnnots env (moduleName, iface) =
+  let
+    pairs = Map.toList $ iAnnots iface
+    pairsToAdd = map (\ (k, v) -> (Module.nameToString moduleName ++ "." ++ k, v)) pairs
+  in Map.union env (Map.fromList pairsToAdd)
+
+missingCaseWarning :: (PatInfo, PatInfo) ->  (Region.Region, Warning.Warning)
+missingCaseWarning (p1, p2 ) =
+  (Region.Region (Region.Position 0 0 ) (Region.Position 0 0 ),
+     Warning.MissingCase p1 p2)
