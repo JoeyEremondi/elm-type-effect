@@ -45,6 +45,7 @@ import Control.Applicative
 import Data.Binary
 
 import Debug.Trace (trace)
+import AST.Type as AT
 
 --Generic data type for type annotations
 data Annot info =
@@ -87,10 +88,10 @@ instance Binary PatMatchAnnotations where
   get = readDict <$> (Data.Binary.get :: Get String)
 -}
 annotPut :: PatMatchAnnotations -> Put
-annotPut = put . show --put :: PatMatchAnnotations -> Put
+annotPut = put . toTypes --put :: PatMatchAnnotations -> Put
 
 annotGet :: Get PatMatchAnnotations
-annotGet = readDict <$> (Data.Binary.get :: Get String)
+annotGet = fromTypes <$> (Data.Binary.get )
 
 data AnnConstraint info =
   Contains (Annot info) info
@@ -175,3 +176,59 @@ directRecord fields restOfRecord = trace ("Direct record " ++ show (map (\(f,x) 
 
 
 type PatMatchAnnotations =  (Map.Map String (AnnotScheme PatInfo))
+
+
+toCanonicalAnnot :: PatAnn -> AT.Canonical
+toCanonicalAnnot (BaseAnnot ann) = toCanonical ann
+toCanonicalAnnot Empty = Var "**Empty"
+toCanonicalAnnot (VarAnnot (AnnVar (i, _))) = App (Var "**Var") [(Var $ show i )]
+toCanonicalAnnot (Union ann1 ann2) = App (Var "**Union" ) [toCanonicalAnnot ann1, toCanonicalAnnot ann2]
+
+toCanonical :: PatInfo -> AT.Canonical
+toCanonical (PatLambda info1 info2) = AT.Lambda (toCanonicalAnnot info1) (toCanonicalAnnot info2)
+toCanonical (PatData s subs) = AT.App (Var s) (map toCanonicalAnnot subs )
+toCanonical (PatRecord fields rest) =
+  AT.Record (Map.toList $ Map.map toCanonicalAnnot fields) (Just $ toCanonicalAnnot rest) 
+toCanonical Top  = AT.Var "**Top"
+toCanonical NativeAnnot = AT.Var "**NativeAnnot"
+toCanonical (MultiPat fields) =
+  AT.App (Var "**Multi") $
+    [AT.Record (Map.toList $ Map.map (\l -> AT.App (Var "**List") (map toCanonicalAnnot l)) fields ) Nothing]
+
+toCanonicalScheme :: AnnotScheme PatInfo -> AT.Canonical
+toCanonicalScheme (SchemeAnnot annot) = toCanonicalAnnot annot
+toCanonicalScheme (AnnForAll vars _ annot) =
+  App
+    (App (Var "**VarList") (map (\(AnnVar (i, _))  -> Var (show i ) ) vars ) )
+    [toCanonicalAnnot annot]
+
+canonToAnn :: AT.Canonical -> PatAnn
+canonToAnn (Var "**Empty" ) = Empty
+canonToAnn (App (Var "**Var") [(Var si )]) = VarAnnot $ AnnVar ((read si) :: Int, error "Should never access desc")
+canonToAnn (App (Var "**Union" ) [ann1,  ann2]) =
+  Union (canonToAnn ann1) (canonToAnn ann2) 
+canonToAnn c = BaseAnnot $ canonToInfo c
+
+canonToInfo :: AT.Canonical -> PatInfo
+canonToInfo (AT.Lambda i1 i2) = PatLambda (canonToAnn i1) (canonToAnn i2)
+canonToInfo (AT.Var "**Top") = Top
+canonToInfo (AT.App (Var "**Multi") [AT.Record subs _]) =
+  MultiPat $ Map.map (\ (App (Var "**List" ) subs ) -> map canonToAnn subs) $ Map.fromList subs
+canonToInfo (AT.App (Var s) subs ) = PatData s $ map canonToAnn subs
+canonToInfo (AT.Record subs rest) =
+  PatRecord (Map.map canonToAnn $ Map.fromList subs )
+    (case rest of
+          Just r -> canonToAnn r
+          _ -> Empty)
+
+canonToScheme (App (App (Var  "**VarList") vars ) [annot] ) =
+  AnnForAll
+    (map (\ (Var si) ->  AnnVar ((read si) :: Int, error "Should never access desc") ) vars )
+    true (canonToAnn annot)
+canonToScheme c = SchemeAnnot $ canonToAnn c
+
+toTypes :: PatMatchAnnotations -> Map.Map String AT.Canonical
+toTypes = Map.map toCanonicalScheme
+
+fromTypes :: Map.Map String AT.Canonical -> PatMatchAnnotations 
+fromTypes = Map.map canonToScheme

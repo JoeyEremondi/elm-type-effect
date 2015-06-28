@@ -32,6 +32,9 @@ import qualified Data.UnionFind.IO as UF
 
 import Control.Applicative
 
+import GHC.Stack
+
+import AST.Type as AT
 
 data AnnEnv info =
   AnnEnv
@@ -63,7 +66,7 @@ addAnnToEnv var ty env = env {dict = Map.insert var ty (dict env)}
 
 readEnv :: String -> AnnEnv info -> (AnnotScheme info)
 readEnv var env = case Map.lookup var (dict env) of
-  Nothing -> error $ "Variable " ++ var ++ " not in env " ++ (show $ Map.keys $ dict env )
+  Nothing -> errorWithStackTrace $ "Variable " ++ var ++ " not in env " ++ (show $ Map.keys $ dict env )
   Just x -> x
 
 constructor = Env.constructor . importedInfo
@@ -125,7 +128,7 @@ closeScheme env con s@(AnnForAll _ _ _) = s
 closeScheme env con (SchemeAnnot ann) =
   let
     varsToOmit = concatMap freeInScheme $ Map.elems (dict env)
-    vars = (freeIn varsToOmit ann) ++ (freeInConstr varsToOmit con )
+    vars = List.nub $ (freeIn varsToOmit ann) ++ (freeInConstr varsToOmit con )
   in AnnForAll vars con ann
 
 
@@ -243,3 +246,6 @@ occurringVars (BaseAnnot info) =
 existsWith env f = do
   fresh <- newVar env
   f (VarAnnot fresh)
+
+
+
