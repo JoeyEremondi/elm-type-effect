@@ -165,6 +165,17 @@ patUnInit = MultiPat Map.empty
 
 emptyAnnot = Empty --BaseAnnot $ PatOther []
 
+closeEnv frag defConstr =
+  let
+    schemeConstr = defConstr /\ (typeConstraint frag )
+  in Map.map (closeScheme defConstr)
+
+closeScheme con s@(AnnForAll _ _ _) = s
+closeScheme con (SchemeAnnot ann) =
+  let
+    vars = freeVars ann
+  in AnnForAll vars con ann
+
 --import Debug.Trace (trace, traceStack)
 
 

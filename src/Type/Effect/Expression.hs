@@ -105,8 +105,10 @@ constrain env (A region expr) tipe = do
 
 
       --Variable has annotation scheme that we look up in the environment
-      Var var ->
-        _ --return $ tipe `InstanceOf` (readEnv name env)
+      Var var -> do
+        let scheme = (readEnv name env)
+        (t, constr ) <- instantiate env scheme 
+        return $ (t === tipe ) /\ (constr)
           where
             name = V.toString var
 
@@ -169,7 +171,7 @@ constrain env (A region expr) tipe = do
             fnTy <- makeFn targ tbody
             let retConstr =
                   --TODO fragment
-                  typeConstraint fragment /\  cMatch /\ (tipe === fnTy) -- fnTy
+                  typeConstraint fragment /\   cMatch /\ (tipe === fnTy) -- fnTy
             return retConstr
 
       --Nothing fancy here: we ensure the function has a function annotation
@@ -266,7 +268,7 @@ constrain env (A region expr) tipe = do
                  canMatchConstr <- Pattern.allMatchConstraints fragEnv tp region [pat]
                  return $ expConstr /\ canMatchConstr
              --TODO extra pattern match constraints
-               
+             let closedEnv = closeEnv frag (Common.and defConstrs)  
              cbody <- constrain fragEnv body tipe
              return $  cbody /\ (Common.and defConstrs) /\ (typeConstraint frag)
 
