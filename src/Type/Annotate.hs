@@ -61,7 +61,7 @@ showConstr con = case con of
 checkTotality
     :: Interfaces
     -> CanonicalModule
-    -> ([(Region.Region, Warning.Warning)], Map.Map String Type.Canonical)
+    -> ([(Region.Region, Warning.Warning)], PatMatchAnnotations)
 checkTotality interfaces modul =
     unsafePerformIO $ do
         (constraint, envDict, header) <-
@@ -74,10 +74,10 @@ checkTotality interfaces modul =
         --                            _ -> error ("\nOTHER ERROR " ++ errToString ap )) [] (TS.sError state)
 
         let header' = Map.delete "::" header
-        let types = Map.map A.drop (Map.difference (error "TODO get final env from Solver" ) header')
+        let types =  (Map.difference finalEnv header')
 
-        retDict <- liftIO (Traverse.traverse T.toSrcType types)
-        return $ trace (show retDict ) $ (warnings, retDict)
+        --retDict <- liftIO (Traverse.traverse T.toSrcType types)
+        return $ trace (show types ) $ (warnings, types)
           
     --do  (header, constraint) <- genTotalityConstraints interfaces modul
 
