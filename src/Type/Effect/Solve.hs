@@ -13,18 +13,15 @@ import Control.Applicative
 
 import Data.IORef
 
+--import Debug.Trace (trace)
+
 type SetStore = (Map.Map Int PatInfo)
 type SetRef = IORef SetStore
 
 solve :: PatMatchAnnotations -> AnnConstraint PatInfo -> IO (PatMatchAnnotations, [(PatInfo, PatInfo )])
 solve env constr = do
   varSets <- newIORef (Map.empty :: Map.Map Int PatInfo)
-  let linearizeConstrs c = case c of
-        ConstrAnd c1 c2 -> (linearizeConstrs c1) ++ (linearizeConstrs c2)
-        AnnTrue -> []
-        --Turn instances into unification when we can
-        --InstanceOf c1 (SchemeAnnot c2 ) -> [Unify c1 c2]
-        _ -> [c]
+
 
   let orderedConsts = List.sortBy orderConstrs $ linearizeConstrs constr
 
@@ -82,11 +79,13 @@ normalizeScheme ref (AnnForAll vars _ ann) = do
   --Rewrite variables based on their annotations
   newVars <-
         List.nub <$> Monad.forM vars
-          (\ (AnnVar (_, uf) ) -> do
-                                 desc <- UF.descriptor uf
-                                 return $ AnnVar (desc, uf) )
+          (\ (AnnVar (i, uf) ) -> if i < 0
+                                 then return $ AnnVar (i, uf)
+                                 else do
+                                   desc <- UF.descriptor uf
+                                   return $ AnnVar (desc, uf) ) 
   normalAnn <- normalize ref ann --TODO remove non-free vars?
-  return $ AnnForAll newVars true normalAnn 
+  return $ AnnForAll vars true normalAnn 
 --TODO need to deal with constr? should have already incorporated it
 --into descriptors for variables
 
@@ -171,7 +170,7 @@ unifyConstrs ref (BaseAnnot info1) (BaseAnnot info2) = case (info1, info2) of
 
 joinPatInfo :: PatInfo -> PatInfo -> PatInfo
 joinPatInfo (PatLambda a1 b1 ) (PatLambda a2 b2 ) = PatLambda (joinAnnots a1 a2) (joinAnnots b1 b2)
-joinPatInfo (PatRecord fields1 rest1) (PatRecord fields2 rest2) = error "TODO records"
+joinPatInfo (PatRecord fields1 rest1) (PatRecord fields2 rest2) = Top --TODO record case!
 joinPatInfo Top _ = Top
 joinPatInfo _ Top = Top
 joinPatInfo NativeAnnot _ = Top

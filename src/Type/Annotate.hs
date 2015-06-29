@@ -71,7 +71,8 @@ checkTotality interfaces modul =
     unsafePerformIO $ do
         (constraint, envDict, header) <-
             liftIO (genTotalityConstraints interfaces modul)
-        (finalEnv, rawWarnings) <- trace ("\n\nConstraint:\n" ++ show constraint ++ "\n\n" )
+        (finalEnv, rawWarnings) <-
+          trace ("\n\nConstraint:\n" ++ show (linearizeConstrs constraint) ++ "\n\n" )
                                   $ solve envDict constraint
         let warnings =  map missingCaseWarning rawWarnings
         --let warnings = List.foldr (\ ap@(A.A reg p) soFar ->

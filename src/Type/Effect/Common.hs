@@ -75,7 +75,7 @@ instance Show (AnnVar info) where
   show (AnnVar (_,uf)) = show $ unsafePerformIO $ UF.descriptor uf
 
 instance Read (AnnVar PatInfo) where
-  readsPrec _ (sh:st) =  [(AnnVar ((read [sh] :: Int), error "Should never use the UF for imported vars"), st)]
+  readsPrec _ (sh:st) =  [(AnnVar ((-1 * read [sh] :: Int), error "Should never use the UF for imported vars"), st)]
 
 deriving instance Read (Annot PatInfo)
 deriving instance Read (AnnotScheme PatInfo)
@@ -104,6 +104,14 @@ data AnnConstraint info =
   | OnlyContains (Annot info) (Annot info)
   | GeneralizedContains (Annot info) (Annot info)
     deriving (Show)
+
+linearizeConstrs c = case c of
+        ConstrAnd c1 c2 -> (linearizeConstrs c1) ++ (linearizeConstrs c2)
+        AnnTrue -> []
+        --Turn instances into unification when we can
+        --InstanceOf c1 (SchemeAnnot c2 ) -> [Unify c1 c2]
+        _ -> [c] 
+            
 constrNum :: AnnConstraint info -> Int
 constrNum (AnnTrue) = -1
 constrNum (Unify _ _) = 0
@@ -206,7 +214,7 @@ toCanonicalScheme (AnnForAll vars _ annot) =
 
 canonToAnn :: AT.Canonical -> PatAnn
 canonToAnn (Var "**Empty" ) = Empty
-canonToAnn (App (Var "**Var") [(Var si )]) = VarAnnot $ AnnVar ((read si) :: Int, error "Should never access desc")
+canonToAnn (App (Var "**Var") [(Var si )]) = VarAnnot $ AnnVar ((-1 * read si) :: Int, error "Should never access desc")
 canonToAnn (App (Var "**Union" ) [ann1,  ann2]) =
   Union (canonToAnn ann1) (canonToAnn ann2) 
 canonToAnn c = BaseAnnot $ canonToInfo c
@@ -225,7 +233,7 @@ canonToInfo (AT.Record subs rest) =
 
 canonToScheme (App (App (Var  "**VarList") vars ) [annot] ) =
   AnnForAll
-    (map (\ (Var si) ->  AnnVar ((read si) :: Int, error "Should never access desc") ) vars )
+    (map (\ (Var si) ->  AnnVar (-1 * (read si) :: Int, error $ "Read binary: Should never access desc, " ++ si) ) vars )
     true (canonToAnn annot)
 canonToScheme c = SchemeAnnot $ canonToAnn c
 

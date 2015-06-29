@@ -48,7 +48,7 @@ data AnnEnv info =
 --Initialize a pool of variables, returning a source of new variables
 initialEnv :: Env.Environment -> IO (AnnEnv info )
 initialEnv tyEnv = do
-  nextVar <- newIORef (0 :: Int)
+  nextVar <- newIORef (1 :: Int)
   return $ AnnEnv nextVar (Map.empty) tyEnv
   
 newVar :: PatAnnEnv -> IO (AnnVar PatInfo)
