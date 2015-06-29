@@ -86,7 +86,12 @@ constrainTopLevel env (A region (Let defs body)) topTy = do
              let closedEnv = addFragToEnv env frag (Common.and defConstrs)  
              --cbody <- constrain closedEnv body topTy
              let constr = (Common.and defConstrs) /\ (typeConstraint frag)
-             return (constr, dict closedEnv)
+             case body of
+               (A _ (Var name) ) | (V.toString name == "_save_the_environment!!!" ) -> return (constr, dict closedEnv)
+               _ -> existsWith closedEnv $ \bodyTy -> constrainTopLevel closedEnv body bodyTy
+                 
+                 
+             
 constrain
     :: PatAnnEnv
     -> Canonical.Expr

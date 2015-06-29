@@ -197,6 +197,8 @@ substVars vCurrent vsub (BaseAnnot info) = do
       newPairs <- mapM fixPair pairs
       return $ MultiPat $ Map.fromList newPairs
   return $ BaseAnnot newInfo
+substVars _ _ Empty = return Empty
+substVars v1 v2 (Union i1 i2) = Union <$> substVars v1 v2 i1 <*> substVars v1 v2 i2
 
 freeInScheme :: AnnotScheme PatInfo -> [AnnVar PatInfo]
 freeInScheme (SchemeAnnot ann) = freeIn [] ann

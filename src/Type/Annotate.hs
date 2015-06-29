@@ -41,6 +41,9 @@ import Type.Effect.Solve
 
 import Control.Applicative
 
+import qualified Reporting.PrettyPrint as RPP
+import Text.PrettyPrint
+
 showVar t = show $ pretty App t
 
 
@@ -78,8 +81,11 @@ checkTotality interfaces modul =
         let header' = Map.delete "::" header
         let types =  (Map.difference finalEnv header')
 
+
+        --trace ("\n\n\nFinalEnv " ++ show (Map.keys finalEnv) ++ "\n\nHeader\n" ++ show (Map.keys header') ++"\n\n\n\n"  )
         --retDict <- liftIO (Traverse.traverse T.toSrcType types)
-        return $  (warnings, types)
+        return
+          $ (warnings, types)
           
     --do  (header, constraint) <- genTotalityConstraints interfaces modul
 
@@ -94,8 +100,8 @@ genTotalityConstraints
 genTotalityConstraints interfaces modul =
   do
 
-      
-    
+      let modCode = render $ RPP.pretty Map.empty False (program (body modul))
+      --putStrLn $ "\n\n\n\nModule code\n\n" ++ modCode ++ "\n\n\n"
       normalEnv <- Env.initialEnvironment (canonicalizeAdts interfaces modul)
 
       ctors <-  forM (Map.keys (Env.constructor normalEnv)) $ \name -> do
@@ -124,24 +130,12 @@ genTotalityConstraints interfaces modul =
 
       let env = addFragToEnv (emptyEnv {dict = annotDict}) ctorFrag true
       fvar <- VarAnnot `fmap` newVar env
-      (constr, topEnv ) <-EfExpr.constrainTopLevel env (program (body modul)) fvar  
-      return (constr, topEnv, annotDict)
-      {-
-      ctors <-  forM (Map.keys (Env.constructor env)) $ \name -> do
-                 (_, vars, args, result) <- liftIO $ Env.freshDataScheme env name
-                 return (name, (vars, foldr (T.==>) result args))
-      --canonicalizeAnnots
-      importedVars <-  mapM (canonicalizeAnnots env) (Map.toList interfaces)
-      let importedNames = map (\l -> map fst l ) importedVars
+      (constr, topEnv ) <-EfExpr.constrainTopLevel env (program (body modul)) fvar
+
+
       
-
-      let allTypes = concat (ctors : importedVars)
-          vars = concatMap (fst . snd) allTypes
-          header = Map.map snd (Map.fromList allTypes)
-          --environ = T.CLet [ T.Scheme vars [] T.CTrue (Map.map (A.A undefined) header) ]
-
-      -}
-      --return (header, c)
+      
+      return (constr, topEnv, annotDict)
 
 
 
