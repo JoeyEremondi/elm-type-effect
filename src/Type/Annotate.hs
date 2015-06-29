@@ -39,6 +39,8 @@ import Type.PrettyPrint
 import Type.Effect.Env
 import Type.Effect.Solve
 
+import Control.Applicative
+
 showVar t = show $ pretty App t
 
 
@@ -91,8 +93,18 @@ genTotalityConstraints
     ->  IO (AnnConstraint PatInfo, PatMatchAnnotations, PatMatchAnnotations)
 genTotalityConstraints interfaces modul =
   do
+
       
+    
       normalEnv <- Env.initialEnvironment (canonicalizeAdts interfaces modul)
+
+      ctors <-  forM (Map.keys (Env.constructor normalEnv)) $ \name -> do
+                 (_, vars, args, result) <- liftIO $ Env.freshDataScheme normalEnv name
+                 return (name, (vars, foldr (T.==>) result args))
+      let ctorNames = map fst ctors
+      
+      
+      
       let annotDict = foldl canonicalizeAnnots Map.empty $ Map.toList interfaces
       let (tyNames, oldTypes) = unzip $ Map.toList $ Env.types normalEnv
       newTypes <- mapM (\_ ->
@@ -103,7 +115,14 @@ genTotalityConstraints interfaces modul =
 
       let importEnv = normalEnv {Env.types = Map.fromList $ zip tyNames newTypes }
       emptyEnv <- initialEnv normalEnv
-      let env = emptyEnv {dict = annotDict}
+
+      let region = Region.Region (Region.Position 0 0 ) (Region.Position 0 0 ) --TODO real region
+      
+      ctorTypes <- forM ctorNames (\_ -> VarAnnot <$> newVar emptyEnv )
+      ctorConstrs <- forM (zip ctorNames ctorTypes) (\(nm, t) -> EfExpr.constrainCtor region emptyEnv nm t )
+      let ctorFrag = AnnFragment (Map.fromList $ zip ctorNames ctorTypes) [] (Type.Effect.Common.and ctorConstrs)
+
+      let env = addFragToEnv (emptyEnv {dict = annotDict}) ctorFrag true
       fvar <- VarAnnot `fmap` newVar env
       (constr, topEnv ) <-EfExpr.constrainTopLevel env (program (body modul)) fvar  
       return (constr, topEnv, annotDict)
