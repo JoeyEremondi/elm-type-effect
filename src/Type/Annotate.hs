@@ -79,7 +79,7 @@ checkTotality interfaces modul =
         let types =  (Map.difference finalEnv header')
 
         --retDict <- liftIO (Traverse.traverse T.toSrcType types)
-        return $ trace (show types ) $ (warnings, types)
+        return $  (warnings, types)
           
     --do  (header, constraint) <- genTotalityConstraints interfaces modul
 
