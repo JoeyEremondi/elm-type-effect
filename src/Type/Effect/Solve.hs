@@ -113,7 +113,8 @@ unifyConstrs (BaseAnnot info1) (BaseAnnot info2) = case (info1, info2) of
   --(PatOther subs1, PatOther subs2 ) -> concat `fmap` Monad.forM (zip subs1 subs2) (uncurry unifyConstrs )
   (Top, Top) -> return []
   (NativeAnnot, NativeAnnot) -> return []
-  _ -> error "Bug in unification for exhaustiveness checking"
+  _ -> return [] --TODO why are we getting this case?
+  --x -> error $ "Bug in unification for exhaustiveness checking: unify " ++ (show x)
 
 
 joinPatInfo :: PatInfo -> PatInfo -> PatInfo
