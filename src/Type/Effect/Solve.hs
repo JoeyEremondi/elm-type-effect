@@ -50,10 +50,18 @@ solve env constr = do
 
   warnings <- concat `fmap` Monad.forM orderedConsts processConstr
 
-  let (keys, vals) = unzip $ Map.toList env
-  newVals <- Monad.forM vals (normalizeScheme varSets)
+  let pairs = Map.toList env
+  --We only normalize schemes that weren't imported
+  newPairs <- Monad.forM pairs
+             (\ (k,v) -> do
+                 case ('.' `elem` k) of
+                   False -> return (k,v)
+                   True -> do
+                     newV <- normalizeScheme varSets v
+                     return (k, newV)
+                 )
   
-  let retEnv = Map.fromList $ zip keys newVals
+  let retEnv = Map.fromList $ newPairs
   return (retEnv, warnings)
 
 normalize :: SetRef -> PatAnn -> IO PatAnn
@@ -76,8 +84,9 @@ normalizeScheme ref (AnnForAll vars _ ann) = do
         List.nub <$> Monad.forM vars
           (\ (AnnVar (_, uf) ) -> do
                                  desc <- UF.descriptor uf
-                                 return $ AnnVar (desc, uf) ) 
-  (AnnForAll newVars true) <$> normalize ref ann
+                                 return $ AnnVar (desc, uf) )
+  normalAnn <- normalize ref ann --TODO remove non-free vars?
+  return $ AnnForAll newVars true normalAnn 
 --TODO need to deal with constr? should have already incorporated it
 --into descriptors for variables
 
