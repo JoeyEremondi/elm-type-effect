@@ -11,8 +11,14 @@ import qualified Data.Map as Map
 
 import Control.Applicative
 
+import Data.IORef
+
+type SetStore = (Map.Map Int PatInfo)
+type SetRef = IORef SetStore
+
 solve :: PatMatchAnnotations -> AnnConstraint PatInfo -> IO (PatMatchAnnotations, [(PatInfo, PatInfo )])
 solve env constr = do
+  varSets <- newIORef (Map.empty :: Map.Map Int PatInfo)
   let linearizeConstrs c = case c of
         ConstrAnd c1 c2 -> (linearizeConstrs c1) ++ (linearizeConstrs c2)
         AnnTrue -> []
@@ -24,13 +30,17 @@ solve env constr = do
 
   let processConstr c =
         case c of
-          Unify t1 t2 -> unifyConstrs t1 t2
+          Unify t1 t2 -> unifyConstrs varSets t1 t2
           --InstanceOf t1 scheme -> do
           --  newTy <- instantiate env scheme
           --  unifyConstrs t1 newTy
           Contains (VarAnnot (AnnVar (_, uf1))) info -> do
-            currentInfo <- UF.descriptor uf1
-            UF.setDescriptor uf1 $ joinPatInfo currentInfo info
+            intIndex <- UF.descriptor uf1
+            currentSets <- readIORef varSets
+            case (Map.lookup intIndex currentSets) of
+              Nothing -> writeIORef varSets $ Map.insert intIndex
+                        (joinPatInfo (MultiPat Map.empty ) info) currentSets
+              (Just x) -> writeIORef varSets $ Map.insert intIndex (joinPatInfo x info) currentSets
             return []
           Contains (BaseAnnot info1) info2 -> 
             error "TODO manual check if contained"
@@ -41,74 +51,107 @@ solve env constr = do
   warnings <- concat `fmap` Monad.forM orderedConsts processConstr
 
   let (keys, vals) = unzip $ Map.toList env
-  newVals <- Monad.forM vals normalizeScheme
+  newVals <- Monad.forM vals (normalizeScheme varSets)
   
   let retEnv = Map.fromList $ zip keys newVals
   return (retEnv, warnings)
 
-normalize :: PatAnn -> IO PatAnn
-normalize (VarAnnot (AnnVar (_, uf1))) = do
-      desc <- UF.descriptor uf1
-      BaseAnnot <$> normalizeInfo desc
-normalize (Union a1 a2) = Union <$> (normalize a1) <*> (normalize a2)
-normalize Empty = return Empty
-normalize (BaseAnnot info) = BaseAnnot <$> normalizeInfo info
+normalize :: SetRef -> PatAnn -> IO PatAnn
+normalize ref (VarAnnot (AnnVar (_, uf1))) = do
+      intIndex <- UF.descriptor uf1
+      currentSets <- readIORef ref
+      let maybeInfo = Map.lookup intIndex currentSets
+      case maybeInfo of
+        Just info -> BaseAnnot <$> normalizeInfo ref info
+        Nothing -> return $ VarAnnot $ AnnVar (intIndex, uf1)
+normalize ref (Union a1 a2) = Union <$> (normalize ref a1) <*> (normalize ref a2)
+normalize ref Empty = return Empty
+normalize ref (BaseAnnot info) = BaseAnnot <$> normalizeInfo ref info
 
-normalizeScheme :: AnnotScheme PatInfo -> IO (AnnotScheme PatInfo)
-normalizeScheme (SchemeAnnot ann) = SchemeAnnot <$> normalize ann
-normalizeScheme (AnnForAll vars _ ann) = (AnnForAll vars true) <$> normalize ann
+normalizeScheme :: SetRef -> AnnotScheme PatInfo -> IO (AnnotScheme PatInfo)
+normalizeScheme ref (SchemeAnnot ann) = SchemeAnnot <$> normalize ref ann
+normalizeScheme ref (AnnForAll vars _ ann) = do
+  --Rewrite variables based on their annotations
+  newVars <-
+        List.nub <$> Monad.forM vars
+          (\ (AnnVar (_, uf) ) -> do
+                                 desc <- UF.descriptor uf
+                                 return $ AnnVar (desc, uf) ) 
+  (AnnForAll newVars true) <$> normalize ref ann
 --TODO need to deal with constr? should have already incorporated it
 --into descriptors for variables
 
-normalizeInfo :: PatInfo -> IO PatInfo
-normalizeInfo (PatLambda info1 info2) = PatLambda <$> normalize info1 <*> normalize info2
-normalizeInfo (PatData s subs) = do
-  subNormals <- Monad.forM subs normalize
+normalizeInfo :: SetRef -> PatInfo -> IO PatInfo
+normalizeInfo ref (PatLambda info1 info2) = PatLambda <$> normalize ref info1 <*> normalize ref info2
+normalizeInfo ref (PatData s subs) = do
+  subNormals <- Monad.forM subs (normalize ref)
   return $ PatData s subNormals
-normalizeInfo (PatRecord fields rest) = do
+normalizeInfo ref (PatRecord fields rest) = do
   let (keys, vals) = unzip $ Map.toList fields
-  subNormals <- Monad.forM vals normalize
+  subNormals <- Monad.forM vals (normalize ref)
   let newMap = Map.fromList $ zip (keys) subNormals
-  newRest <- normalize rest
+  newRest <- normalize ref rest
   return $ PatRecord newMap newRest
-normalizeInfo Top  = return Top
-normalizeInfo NativeAnnot = return  NativeAnnot
-normalizeInfo (MultiPat fields) = do
+normalizeInfo ref Top  = return Top
+normalizeInfo ref NativeAnnot = return  NativeAnnot
+normalizeInfo ref (MultiPat fields) = do
   let (keys, vals) = unzip $ Map.toList fields
-  subNormals <- Monad.forM vals (Monad.mapM normalize)
+  subNormals <- Monad.forM vals (Monad.mapM $ normalize ref)
   let newMap = Map.fromList $ zip keys subNormals
   return $ MultiPat newMap
 
 --TODO: cases for Empty
-unifyConstrs :: PatAnn -> PatAnn -> IO [(PatInfo, PatInfo )]
-unifyConstrs (VarAnnot (AnnVar (_, uf1))) (VarAnnot (AnnVar (_, uf2))) = do
+unifyConstrs :: SetRef -> PatAnn -> PatAnn -> IO [(PatInfo, PatInfo )]
+unifyConstrs ref (VarAnnot (AnnVar (_, uf1))) (VarAnnot (AnnVar (_, uf2))) = do
+    --Read the sets stored at each variable
+    --And merge them
+    --TODO is this right? Shouldn't they be equal?
+    i <- UF.descriptor uf1
+    j <- UF.descriptor uf2
+    currentSets <- readIORef ref
+    let m1 = Map.lookup i currentSets
+    let m2 = Map.lookup j currentSets
     UF.union uf1 uf2
+    k <- UF.descriptor uf1 --Different now that we've unioned
+    let m3 = Map.lookup k currentSets
+    let ijRemoved = Map.delete i $ Map.delete j currentSets
+    let joinTwo mx my = case (mx, my) of
+          (Nothing, Nothing) -> Nothing
+          (Just x, Nothing) -> Just x
+          (Just x, Just y) -> Just $ joinPatInfo x y
+          (Nothing, Just y) -> Just y
+    let join12 = joinTwo m1 m2
+        join23 = joinTwo join12 m3
+    case join23 of 
+         Nothing -> return ()
+         (Just x) -> writeIORef ref $ Map.insert k x ijRemoved
     return []
-unifyConstrs (VarAnnot (AnnVar (_, uf1))) (BaseAnnot info) = do
-  storedDescr <- UF.descriptor uf1
-  case storedDescr of
-    MultiPat dict -> case (Map.toList dict) of
-        [] -> do
-          UF.setDescriptor uf1 $ joinPatInfo storedDescr info
-          return []
-        _ -> error "Should not have Multi Dict at this point"
-    _ -> unifyConstrs (BaseAnnot storedDescr) (BaseAnnot info)
-unifyConstrs x y@(VarAnnot _) = unifyConstrs y x
+unifyConstrs ref (VarAnnot (AnnVar (_, uf1))) (BaseAnnot info) = do
+  currentSets <- readIORef ref
+  intIndex <- UF.descriptor uf1
+  let maybeCurrent = Map.lookup intIndex currentSets
+  case maybeCurrent of
+    Nothing -> writeIORef ref $ Map.insert intIndex info currentSets 
+    Just (info2) -> writeIORef ref $ Map.insert intIndex (joinPatInfo info info2) currentSets
+  return []
+unifyConstrs ref x y@(VarAnnot _) = unifyConstrs ref y x
+unifyConstrs _ _ _ = return []
 --TODO empty cases? this is not right
-unifyConstrs (BaseAnnot info1) (BaseAnnot info2) = case (info1, info2) of
+--TODO use unify to verify equal?
+unifyConstrs ref (BaseAnnot info1) (BaseAnnot info2) = case (info1, info2) of
   (PatLambda a1 b1, PatLambda a2 b2) -> do
-    l1 <- unifyConstrs a1 a2
-    l2 <- unifyConstrs b1 b2
+    l1 <- unifyConstrs ref a1 a2
+    l2 <- unifyConstrs ref b1 b2
     return $ l1 ++ l2
   --TODO assert same size subs?
   (PatData s1 subs1, PatData s2 subs2) -> case s1 == s2 of
     False -> error "Unify DATA with non-equal strings"
-    _ -> concat `fmap` Monad.forM (zip subs1 subs2) (uncurry unifyConstrs )
+    _ -> concat `fmap` Monad.forM (zip subs1 subs2) (uncurry $  unifyConstrs ref )
   (PatRecord dict1 rest1, PatRecord dict2 rest2) -> do --TODO assert dicts have same keys
     let allFields = Map.keys dict1
     recErrs <- concat `fmap` Monad.forM allFields 
-              (\k -> unifyConstrs (dict1 Map.! k) (dict2 Map.! k) )
-    restErrs <- unifyConstrs rest1 rest2
+              (\k -> unifyConstrs ref (dict1 Map.! k) (dict2 Map.! k) )
+    restErrs <- unifyConstrs ref rest1 rest2
     return $ recErrs ++ restErrs
   --(PatOther subs1, PatOther subs2 ) -> concat `fmap` Monad.forM (zip subs1 subs2) (uncurry unifyConstrs )
   (Top, Top) -> return []

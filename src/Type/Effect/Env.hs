@@ -55,7 +55,7 @@ newVar :: PatAnnEnv -> IO (AnnVar PatInfo)
 newVar env = do
   ret <- readIORef $ ref env
   writeIORef (ref env) (ret + 1)
-  point <- UF.fresh ( patUnInit)
+  point <- UF.fresh ret
   return $ AnnVar (ret, point)
 
 

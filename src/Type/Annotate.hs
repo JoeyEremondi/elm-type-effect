@@ -71,7 +71,8 @@ checkTotality interfaces modul =
     unsafePerformIO $ do
         (constraint, envDict, header) <-
             liftIO (genTotalityConstraints interfaces modul)
-        (finalEnv, rawWarnings) <- solve envDict constraint
+        (finalEnv, rawWarnings) <- trace ("\n\nConstraint:\n" ++ show constraint ++ "\n\n" )
+                                  $ solve envDict constraint
         let warnings =  map missingCaseWarning rawWarnings
         --let warnings = List.foldr (\ ap@(A.A reg p) soFar ->
         --                          case p of
@@ -84,7 +85,7 @@ checkTotality interfaces modul =
 
         --trace ("\n\n\nFinalEnv " ++ show (Map.keys finalEnv) ++ "\n\nHeader\n" ++ show (Map.keys header') ++"\n\n\n\n"  )
         --retDict <- liftIO (Traverse.traverse T.toSrcType types)
-        return
+        return $ trace ("\n\n\nGenerated annots: " ++ show types )
           $ (warnings, types)
           
     --do  (header, constraint) <- genTotalityConstraints interfaces modul
@@ -101,7 +102,7 @@ genTotalityConstraints interfaces modul =
   do
 
       let modCode = render $ RPP.pretty Map.empty False (program (body modul))
-      --putStrLn $ "\n\n\n\nModule code\n\n" ++ modCode ++ "\n\n\n"
+      putStrLn $ "\n\n\n\nModule code\n\n" ++ modCode ++ "\n\n\n"
       normalEnv <- Env.initialEnvironment (canonicalizeAdts interfaces modul)
 
       ctors <-  forM (Map.keys (Env.constructor normalEnv)) $ \name -> do
@@ -126,16 +127,14 @@ genTotalityConstraints interfaces modul =
       
       ctorTypes <- forM ctorNames (\_ -> VarAnnot <$> newVar emptyEnv )
       ctorConstrs <- forM (zip ctorNames ctorTypes) (\(nm, t) -> EfExpr.constrainCtor region emptyEnv nm t )
-      let ctorFrag = AnnFragment (Map.fromList $ zip ctorNames ctorTypes) [] (Type.Effect.Common.and ctorConstrs)
+      let ctorConstr = Type.Effect.Common.and ctorConstrs
+      let ctorFrag = AnnFragment (Map.fromList $ zip ctorNames ctorTypes) [] ctorConstr
 
       let env = addFragToEnv (emptyEnv {dict = annotDict}) ctorFrag true
       fvar <- VarAnnot `fmap` newVar env
       (constr, topEnv ) <-EfExpr.constrainTopLevel env (program (body modul)) fvar
 
-
-      
-      
-      return (constr, topEnv, annotDict)
+      return (constr  /\  ctorConstr, topEnv, annotDict)
 
 
 

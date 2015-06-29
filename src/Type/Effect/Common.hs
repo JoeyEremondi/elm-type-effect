@@ -47,6 +47,8 @@ import Data.Binary
 import Debug.Trace (trace)
 import AST.Type as AT
 
+import System.IO.Unsafe
+
 --Generic data type for type annotations
 data Annot info =
   BaseAnnot info
@@ -61,7 +63,7 @@ data AnnotScheme info = SchemeAnnot (Annot info) | AnnForAll [AnnVar info] (AnnC
 
 
 --TODO union-find variables?
-newtype AnnVar info = AnnVar (Int, UF.Point info)
+newtype AnnVar info = AnnVar (Int, UF.Point Int)
 
 instance Eq (AnnVar info) where
   (AnnVar (x,_)) == (AnnVar (y,_)) = x == y
@@ -70,7 +72,7 @@ instance Ord (AnnVar info) where
   (AnnVar (x,_)) < (AnnVar (y,_)) = x < y
 
 instance Show (AnnVar info) where
-  show (AnnVar (x,_)) = show x
+  show (AnnVar (_,uf)) = show $ unsafePerformIO $ UF.descriptor uf
 
 instance Read (AnnVar PatInfo) where
   readsPrec _ (sh:st) =  [(AnnVar ((read [sh] :: Int), error "Should never use the UF for imported vars"), st)]

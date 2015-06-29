@@ -88,7 +88,9 @@ constrainTopLevel env (A region (Let defs body)) topTy = do
              let constr = (Common.and defConstrs) /\ (typeConstraint frag)
              case body of
                (A _ (Var name) ) | (V.toString name == "_save_the_environment!!!" ) -> return (constr, dict closedEnv)
-               _ -> existsWith closedEnv $ \bodyTy -> constrainTopLevel closedEnv body bodyTy
+               _ -> do
+                 (newConstr, newEnv ) <- existsWith closedEnv $ \bodyTy -> constrainTopLevel closedEnv body bodyTy
+                 return (newConstr /\ constr, newEnv)
                  
                  
              
