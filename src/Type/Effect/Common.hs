@@ -214,7 +214,7 @@ toCanonicalScheme (AnnForAll vars _ annot) =
 
 canonToAnn :: AT.Canonical -> PatAnn
 canonToAnn (Var "**Empty" ) = Empty
-canonToAnn (App (Var "**Var") [(Var si )]) = VarAnnot $ AnnVar ((-1 * read si) :: Int, error "Should never access desc")
+canonToAnn (App (Var "**Var") [(Var si )]) = VarAnnot $ AnnVar ((-1 * read si) :: Int, error $ "Should never access desc " ++ show si)
 canonToAnn (App (Var "**Union" ) [ann1,  ann2]) =
   Union (canonToAnn ann1) (canonToAnn ann2) 
 canonToAnn c = BaseAnnot $ canonToInfo c
