@@ -109,11 +109,11 @@ genTotalityConstraints interfaces modul =
       ctors <-  forM (Map.keys (Env.constructor normalEnv)) $ \name -> do
                  (_, vars, args, result) <- liftIO $ Env.freshDataScheme normalEnv name
                  return (name, (vars, foldr (T.==>) result args))
-      let ctorNames = map fst ctors
+      let ctorNames = map (fst) ctors
       
       
       
-      let annotDict = foldl canonicalizeAnnots Map.empty $ Map.toList interfaces
+      let annotDict = trace ("CTOR names: " ++ show ctorNames ) $ foldl canonicalizeAnnots Map.empty $ Map.toList interfaces
       let (tyNames, oldTypes) = unzip $ Map.toList $ Env.types normalEnv
       newTypes <- mapM (\_ ->
                         do

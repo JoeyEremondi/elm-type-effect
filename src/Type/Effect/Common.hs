@@ -72,7 +72,10 @@ instance Ord (AnnVar info) where
   (AnnVar (x,_)) < (AnnVar (y,_)) = x < y
 
 instance Show (AnnVar info) where
-  show (AnnVar (_,uf)) = show $ unsafePerformIO $ UF.descriptor uf
+  show (AnnVar (i,uf)) =
+    if i < 0
+      then show i
+      else show $ unsafePerformIO $ UF.descriptor uf
 
 instance Read (AnnVar PatInfo) where
   readsPrec _ (sh:st) =  [(AnnVar ((-1 * read [sh] :: Int), error "Should never use the UF for imported vars"), st)]

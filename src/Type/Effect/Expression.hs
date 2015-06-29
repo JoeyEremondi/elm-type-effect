@@ -39,9 +39,9 @@ import Data.Char (isUpper)
 
 import Type.Effect.Common as Common
 
---import Debug.Trace (trace)
+import Debug.Trace (trace)
 
-trace _ x = x
+--trace _ x = x
 
 nativeOps = map (\n -> V.Canonical (V.Module ["Basics"]) n ) [
   "+"
@@ -78,10 +78,14 @@ constrainTopLevel env (A region (Let defs body)) topTy = do
              --Constrain each RHS of a definition, giving access to all other defs
              --This lets us do mutual recursion
              defConstrs <- forM (zip defVars defs) $
-               \ (tp, Canonical.Definition pat dexp _ ) -> do
-                 expConstr <- constrain (tempAddFrag env frag) dexp tp
-                 canMatchConstr <- Pattern.allMatchConstraints (tempAddFrag env frag) tp region [pat]
-                 return $ expConstr /\ canMatchConstr
+               \ (tp, Canonical.Definition pat dexp _ ) -> case pat of
+                 (A _ (P.Var v)) | isUpper (head v) ->
+                   constrainCtor region env v tp
+                   
+                 _ -> do
+                   expConstr <- constrain (tempAddFrag env frag) dexp tp
+                   canMatchConstr <- Pattern.allMatchConstraints (tempAddFrag env frag) tp region [pat]
+                   return $ expConstr /\ canMatchConstr
              --TODO extra pattern match constraints
              let closedEnv = addFragToEnv env frag (Common.and defConstrs)  
              --cbody <- constrain closedEnv body topTy
@@ -141,7 +145,8 @@ constrain env (A region expr) tipe = do
       Var var -> do
         let scheme = (readEnv name env)
         (t, constr ) <- instantiate env scheme 
-        return $ (t === tipe ) /\ (constr)
+        return $ trace ("Instantiated var" ++ show var ++ " with constr " ++ show constr ++ "\nEnv: " ++ show (dict env))
+          $ (t === tipe ) /\ (constr)
           where
             name = V.toString var
 
@@ -265,8 +270,14 @@ constrain env (A region expr) tipe = do
       --And returning something tagged with (at least) its constructor
       --We also constrain that there exists some (possibly empty) set of other constructors it can take
       --This allows for sub-effecting
-      Data rawName [] -> constrainCtor region env rawName tipe
-
+      Data rawName [] -> do
+        let scheme = (readEnv (ctorQualName rawName) env)
+        (t, constr ) <- instantiate env scheme 
+        return $ trace ("Instantiated " ++ rawName ++ " with constr " ++ show constr)
+                        $ (t === tipe ) /\ (constr)--trace ("Found CTOR " ++ rawName ++ " in DATA") $ constrainCtor region env rawName tipe
+        --We look up constructors in our environment
+        
+        
       --We treat constructor application with args as a function call
       Data rawName args ->  do
         --let name =
@@ -410,12 +421,17 @@ expandPattern def@(Canonical.Definition pa@(A region pattern) lexpr@(A r _) _may
             mkVar = A r . localVar
             toDef y = Canonical.Definition (A region (P.Var y)) (A r $ Case (mkVar x) [(pa, mkVar y)]) Nothing
 
+ctorQualName rawName = 
+              if ('.' `elem` rawName)
+              then rawName
+              else ("Main." ++ rawName )
+
 --To constrain a constructor
 --We get its function type from our environment
 --We annotate it as a function which can accept any arguments
 --And which is annotated with the given constructor
 --And possibly more values
-constrainCtor region env rawName tipe = trace "DATA one " $ do
+constrainCtor region env rawName tipe = trace ("CTOR with raw name " ++ rawName ) $ do
         let qualName =
               if ('.' `elem` rawName)
               then rawName
@@ -441,7 +457,9 @@ constrainCtor region env rawName tipe = trace "DATA one " $ do
                 existsWith env $ \ ctorRetType -> do
                   let ctorRetAnnot = PatData ("_" ++ nm) argTypes
                   ctorAnnotation <- makeCtorType (reverse argTypes) ctorRetType
-                  return $ (ctorRetType `Contains` ctorRetAnnot) /\ (tipe === ctorAnnotation)
+                  let finalConstr = (ctorRetType `Contains` ctorRetAnnot) /\ (tipe === ctorAnnotation)
+                  return $ trace ("CTOR: retAnnot " ++ (show ctorRetAnnot) ++ "\nAnnot " ++ show ctorAnnotation ++ "\bOverall type " ++ show tipe ++ "\nFinal constr: " ++ show finalConstr )
+                    $ finalConstr
           
           doWithArgTypes typeVars nm arity argTypes =
             existsWith env $ \t ->

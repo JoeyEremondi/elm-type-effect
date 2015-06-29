@@ -14,7 +14,7 @@ import Control.Applicative
 import Data.IORef
 
 import Debug.Trace (trace)
---trace _ x = x
+
 
 type SetStore = (Map.Map Int PatInfo)
 type SetRef = IORef SetStore
@@ -35,7 +35,7 @@ solve env constr = do
           Contains (VarAnnot (AnnVar (i, uf1))) info -> do
             intIndex <- if i < 0
                  then return (-1)
-                 else trace "UF8" $ UF.descriptor uf1
+                 else UF.descriptor uf1
             currentSets <- readIORef varSets
             case (Map.lookup intIndex currentSets) of
               Nothing -> writeIORef varSets $ Map.insert intIndex
@@ -54,9 +54,6 @@ solve env constr = do
   --We only normalize schemes that weren't imported
   newPairs <- Monad.forM pairs
              (\ (k,v) -> do
-                 case ('.' `elem` k) of
-                   True -> return (k,v)
-                   False -> do
                      newV <- normalizeScheme varSets v
                      return (k, newV)
                  )
@@ -68,9 +65,9 @@ normalize :: SetRef -> PatAnn -> IO PatAnn
 normalize ref (VarAnnot (AnnVar (i, uf1))) = do
       intIndex <- if i < 0
                  then return (-1)
-                 else trace "UF1" $ UF.descriptor uf1
+                 else UF.descriptor uf1
       currentSets <- readIORef ref
-      let maybeInfo = Map.lookup intIndex currentSets
+      let maybeInfo = trace ("Normallize var " ++ show intIndex ++ " " ++ show currentSets ) $ Map.lookup intIndex currentSets
       case maybeInfo of
         Just info -> BaseAnnot <$> normalizeInfo ref info
         Nothing -> return $ VarAnnot $ AnnVar (intIndex, uf1)
@@ -82,15 +79,19 @@ normalizeScheme :: SetRef -> AnnotScheme PatInfo -> IO (AnnotScheme PatInfo)
 normalizeScheme ref (SchemeAnnot ann) = SchemeAnnot <$> normalize ref ann
 normalizeScheme ref (AnnForAll vars _ ann) = do
   --Rewrite variables based on their annotations
-  newVars <-
+  
+  unifiedVars <-
         List.nub <$> Monad.forM vars
           (\ (AnnVar (i, uf) ) -> if i < 0
                                  then return $ AnnVar (i, uf)
                                  else do
-                                   desc <- trace "UF2" $ UF.descriptor uf
-                                   return $ AnnVar (desc, uf) ) 
+                                   desc <- UF.descriptor uf
+                                   return $ AnnVar (desc, uf) )
+  
+  let newVars = unifiedVars
   normalAnn <- normalize ref ann --TODO remove non-free vars?
-  return $ AnnForAll vars true normalAnn 
+  let usedVars = occurringVars normalAnn 
+  return $ AnnForAll (newVars `List.intersect` usedVars) true normalAnn 
 --TODO need to deal with constr? should have already incorporated it
 --into descriptors for variables
 
@@ -119,12 +120,12 @@ unifyConstrs ref (VarAnnot (AnnVar (vi, uf1))) (VarAnnot (AnnVar (vj, uf2))) = d
     --Read the sets stored at each variable
     --And merge them
     --TODO is this right? Shouldn't they be equal?
-    i <- trace "UF3" $ if vi < 0
+    i <- if vi < 0
                  then return (-1)
-                 else trace "UF4" $ UF.descriptor uf1
-    j <- trace "UF4" $ if vj < 0
+                 else  UF.descriptor uf1
+    j <-  if vj < 0
                  then return (-1)
-                 else trace "UF5" $ UF.descriptor uf2
+                 else UF.descriptor uf2
     currentSets <- readIORef ref
     let m1 = Map.lookup i currentSets
     let m2 = Map.lookup j currentSets
@@ -135,7 +136,7 @@ unifyConstrs ref (VarAnnot (AnnVar (vi, uf1))) (VarAnnot (AnnVar (vj, uf2))) = d
       _ -> do
         k <- if vi < 0
                      then return (-1)
-                     else trace "UF6" $ UF.descriptor uf1 --Different now that we've unioned
+                     else  UF.descriptor uf1 --Different now that we've unioned
         let m3 = Map.lookup k currentSets
         let ijRemoved = Map.delete i $ Map.delete j currentSets
         let joinTwo mx my = case (mx, my) of
@@ -153,7 +154,7 @@ unifyConstrs ref (VarAnnot (AnnVar (i, uf1))) (BaseAnnot info) = do
   currentSets <- readIORef ref
   intIndex <- if i < 0
                  then return (-1)
-                 else trace "UF7" $ UF.descriptor uf1
+                 else  UF.descriptor uf1
   let maybeCurrent = Map.lookup intIndex currentSets
   case maybeCurrent of
     Nothing -> writeIORef ref $ Map.insert intIndex info currentSets 
@@ -181,8 +182,8 @@ unifyConstrs ref (BaseAnnot info1) (BaseAnnot info2) = case (info1, info2) of
   --(PatOther subs1, PatOther subs2 ) -> concat `fmap` Monad.forM (zip subs1 subs2) (uncurry unifyConstrs )
   (Top, Top) -> return []
   (NativeAnnot, NativeAnnot) -> return []
-  _ -> return [] --TODO why are we getting this case?
-  --x -> error $ "Bug in unification for exhaustiveness checking: unify " ++ (show x)
+  --_ -> return [] --TODO why are we getting this case?
+  x -> error $ "Bug in unification for exhaustiveness checking: unify " ++ (show x)
 
 
 joinPatInfo :: PatInfo -> PatInfo -> PatInfo

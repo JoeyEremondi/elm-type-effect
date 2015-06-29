@@ -58,19 +58,15 @@ newVar env = do
   point <- UF.fresh ret
   return $ AnnVar (ret, point)
 
-
-
+unQual :: String -> String
+unQual var = (last $ words $ map (\c -> if c == '.' then ' ' else c ) var )
 
 addAnnToEnv :: String -> (AnnotScheme info) -> AnnEnv info -> AnnEnv info
 addAnnToEnv var ty env = env {dict = Map.insert var ty (dict env)} 
 
 readEnv :: String -> AnnEnv info -> (AnnotScheme info)
 readEnv var env = case Map.lookup var (dict env) of
-  Nothing ->
-    let
-      unQual = (last $ words $ map (\c -> if c == '.' then ' ' else c ) var )
-    in
-     case (Map.lookup unQual (dict env)) of
+  Nothing ->case (Map.lookup (unQual var) (dict env)) of
        Nothing -> errorWithStackTrace $ "Variable " ++ var ++ " not in env " ++ (show $ Map.keys $ dict env )
        Just x -> x
   Just x -> x
