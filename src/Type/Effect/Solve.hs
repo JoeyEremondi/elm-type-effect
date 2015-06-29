@@ -55,8 +55,8 @@ solve env constr = do
   newPairs <- Monad.forM pairs
              (\ (k,v) -> do
                  case ('.' `elem` k) of
-                   False -> return (k,v)
-                   True -> do
+                   True -> return (k,v)
+                   False -> do
                      newV <- normalizeScheme varSets v
                      return (k, newV)
                  )
