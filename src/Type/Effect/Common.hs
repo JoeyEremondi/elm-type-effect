@@ -63,7 +63,7 @@ data AnnotScheme info = SchemeAnnot (Annot info) | AnnForAll [AnnVar info] (AnnC
 
 
 --TODO union-find variables?
-newtype AnnVar info = AnnVar (Int, UF.Point Int)
+newtype AnnVar info = AnnVar (Int, UF.Point (Int, Maybe PatInfo) )
 
 instance Eq (AnnVar info) where
   (AnnVar (x,_)) == (AnnVar (y,_)) = x == y

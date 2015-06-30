@@ -55,8 +55,40 @@ newVar :: PatAnnEnv -> IO (AnnVar PatInfo)
 newVar env = do
   ret <- readIORef $ ref env
   writeIORef (ref env) (ret + 1)
-  point <- UF.fresh ret
+  point <- UF.fresh (ret, Nothing)
   return $ AnnVar (ret, point)
+
+varIndex :: (AnnVar PatInfo) -> IO Int
+varIndex (AnnVar (oldI, uf) ) =
+  if oldI < 0
+     then return oldI
+     else fst <$> UF.descriptor uf
+
+varAnn :: (AnnVar PatInfo) -> IO (Maybe PatInfo)
+varAnn (AnnVar (oldI, uf) ) = if oldI < 0
+     then return Nothing
+     else snd <$> UF.descriptor uf
+
+setAnn :: (AnnVar PatInfo) -> PatInfo -> IO ()
+setAnn (AnnVar (i, uf) ) info =
+  case i < 0 of
+    True -> return ()
+    False -> do
+      (i, oldInfo) <- UF.descriptor uf
+      UF.setDescriptor uf (i, Just info)
+
+unionVars :: (AnnVar PatInfo) -> (AnnVar PatInfo) -> Maybe PatInfo -> IO ()
+unionVars v@(AnnVar (_, uf1) ) (AnnVar (_, uf2) ) info = do
+  UF.union uf1 uf2
+  (i, _) <- UF.descriptor uf1
+  UF.setDescriptor uf1 (i, info )
+
+reprVar v@(AnnVar (i, uf) ) =
+  case i < 0 of
+    True -> return v
+    False -> do
+      newI <- varIndex v
+      return $ AnnVar (newI, uf)
 
 unQual :: String -> String
 unQual var = (last $ words $ map (\c -> if c == '.' then ' ' else c ) var )
